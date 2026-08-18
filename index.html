@@ -369,6 +369,7 @@
         <div class="side-actions">
           <button class="btn-red" id="attackBtn" disabled>⚔️ 공격 (E)</button>
           <button class="btn-cyan" id="shopBtn" disabled>🏪 교환소 (C)</button>
+          <button id="exitBtn" style="display:none;font-size:11px;padding:7px 10px">🚪 로비로</button>
         </div>
         <div style="flex:1;min-width:180px;">
           <div class="hint">
@@ -544,8 +545,7 @@
     <h2>로비</h2>
     <div class="who" id="lobbyWho">방에 참가하거나 새 방을 만드세요</div>
     <div class="sub-note">
-      <b style="color:var(--cream)">멀티플레이</b> — 같은 맵을 공유하며 실시간으로 함께 탐험합니다.
-      다른 사람이 판 자리는 나에게도 파인 것으로 보입니다.<br>
+      <b style="color:var(--cream)">멀티플레이</b> — 같은 맵을 공유하며 함께 탐험합니다. 판 자리가 공유되고,<br>1:1 체력 베팅 대전과 200초마다 열리는 원탁 단체배틀을 실제 사람과 벌입니다.<br>
       <b style="color:var(--cream)">혼자 하기</b> — 라이벌 봇 4명 · 원탁 단체배틀 · 1:1 배틀이 모두 포함됩니다.
     </div>
     <div class="sec-title">열려 있는 방</div>
@@ -688,6 +688,7 @@ function paintCard(el,c){
 }
 function giveCard(owner,card){
   owner.cards.push(card);
+  if(owner.isMe) markInvDirty();
   if(card.month>=11) announce(`${owner.name}님이 ${card.month}월 ${TLABEL[card.type]} 카드를 획득했습니다!`);
   if(!owner.isMe) checkRivalVictory(owner);
   return card;
@@ -875,16 +876,36 @@ function move(dx,dy){
   if(player.autoDigUntil>Date.now()) dig(true);
   render(); drawMinimap(); refreshActions();
 }
+/* ===== 타일별 결정론적 내용 =====
+   (맵 시드 + 타일 번호)로만 결과가 정해지므로 클라이언트가 조작할 수 없다. */
+function tileRngAt(i){
+  return mulberry32((mapSeed ^ Math.imul(i+1,2654435761) ^ 0x9E3779B9)>>>0);
+}
+function cardOfR(m,r,tag){
+  const ty=DECK[m][Math.floor(r()*DECK[m].length)];
+  return {month:m,name:MONTHS[m-1][1],type:ty,id:tag};
+}
+function rollCardR(r,tag){
+  let x=r()*100;
+  x-=P_DDAENG;      if(x<=0) return {month:0,name:'땡',type:'ddaeng',id:tag};
+  x-=P_GWANGDDAENG; if(x<=0) return {month:0,name:'광땡',type:'gwangddaeng',id:tag};
+  for(const [m,w] of DROP){ x-=w; if(x<=0) return cardOfR(m,r,tag); }
+  return cardOfR(1,r,tag);
+}
 /* 일반 타일 1칸 처리 (비용 계산 제외, 결과 문자열 반환) */
 function resolveTile(i){
-  const k=tiles[i];
+  const k=tiles[i], r=tileRngAt(i);
   markDug(i);
-  if(k===1){ const c=giveCard(player,rollCard()); return {t:`🎴 ${cardLabel(c)} 획득!`,k:'card'}; }
+  if(k===1){ const c=giveCard(player,rollCardR(r,'t'+i)); return {t:`🎴 ${cardLabel(c)} 획득!`,k:'card'}; }
   if(k===2){
-    const amt=3+countItem('세공증')+Math.floor(Math.random()*15);
+    const amt=3+countItem('세공증')+Math.floor(r()*15);
     player.gold+=amt; return {t:`💰 ${G(amt)} 획득`,k:'gold'};
   }
-  if(k===3){ const it=rollItem(); player.items.push(it); return {t:`🎒 ${it} 획득!`,k:'item'}; }
+  if(k===3){
+    let x=r()*100, it=ITEMS[0].n;
+    for(const o of ITEMS){ x-=o.w; if(x<=0){ it=o.n; break; } }
+    player.items.push(it); return {t:`🎒 ${it} 획득!`,k:'item'};
+  }
   return {t:'흙만 나왔습니다 · 꽝',k:'none'};
 }
 /* 맵 하단 전리품/효과 표시 */
@@ -930,6 +951,7 @@ function dig(auto){
   if(shopAt[i]){ if(!auto) digMsg('교환소 구역은 팔 수 없습니다','warn'); return; }
   if(dug[i]){ if(!auto) digMsg('이미 파본 자리입니다','warn'); return; }
   if(player.gold<1){ if(!auto) digMsg('골드가 부족합니다 · 삽질 1G','warn'); return; }
+  if(isMulti()){ mpDig(i,auto); return; }
   player.gold-=1;
 
   const sp=SPECIAL[tiles[i]];
@@ -1052,13 +1074,17 @@ function adjacentFoe(){
   return null;
 }
 function refreshActions(){
-  const foe=adjacentFoe(), ab=$('attackBtn');
-  ab.disabled=!foe||busy()||gameOver;
+  const foe=isMulti()?adjacentRemoteFoe():adjacentFoe();
+  const ab=$('attackBtn');
+  ab.disabled=!foe||busy()||gameOver||!!duel;
   ab.textContent=inShop(player)?'🛡 안전지대':(foe?`⚔️ ${foe.name} 공격 (E)`:'⚔️ 공격 (E)');
   $('shopBtn').disabled=!shopAt[idx(player.x,player.y)]||busy()||gameOver;
 }
 setInterval(refreshActions,400);
-$('attackBtn').onclick=()=>{ const f=adjacentFoe(); if(f) openBattle(f); };
+$('attackBtn').onclick=()=>{
+  if(isMulti()){ const f=adjacentRemoteFoe(); if(f) challenge(f); else toast('공격할 대상이 없습니다'); return; }
+  const f=adjacentFoe(); if(f) openBattle(f);
+};
 
 /* ================= 1:1 배틀 ================= */
 const ov=$('battleOverlay');
@@ -1088,6 +1114,7 @@ function startBetTimer(){
 $('betInput').oninput=e=>{ $('betRange').value=e.target.value; };
 $('betRange').oninput=e=>{ $('betInput').value=e.target.value; };
 $('betConfirm').onclick=()=>{
+  if(duel){ duelBet(); return; }
   const max=Math.max(1,player.hp-1), bet=parseInt($('betInput').value,10);
   if(isNaN(bet)||bet<1||bet>max){ toast('베팅 값을 확인하세요'); return; }
   clearInterval(betTimer); resolveBattle(bet);
@@ -1130,7 +1157,7 @@ function resolveBattle(bet){
   if(foe.hp<=0){ const s=freeSpot(); foe.hp=60; foe.x=s.x; foe.y=s.y; }
   updateUI(); render(); drawMinimap();
 }
-$('resultClose').onclick=()=>{ ov.classList.remove('show'); checkDown(); refreshActions(); };
+$('resultClose').onclick=()=>{ if(duel){ closeDuel(); return; } ov.classList.remove('show'); checkDown(); refreshActions(); };
 function doFlee(auto){
   clearInterval(betTimer); player.hp-=5;
   battleFoe.invulUntil=Date.now()+INVUL_MS; player.invulUntil=Date.now()+INVUL_MS;
@@ -1138,7 +1165,7 @@ function doFlee(auto){
   log(`${battleFoe.name}에게서 ${auto?'시간이 지나 자동으로 ':''}물러났습니다 · 체력 -5`);
   checkDown(); updateUI(); refreshActions();
 }
-$('fleeBtn').onclick=()=>doFlee(false);
+$('fleeBtn').onclick=()=>{ if(duel){ duelFlee(false); return; } doFlee(false); };
 function checkDown(){
   if(player.hp>0) return;
   const lostGold=Math.floor(player.gold*0.9);
@@ -1522,6 +1549,8 @@ function finishRT(winner){
   updateUI();
 }
 $('rtClose').onclick=()=>{ stopAct(); $('rtOverlay').classList.remove('show'); gb=null; refreshActions(); };
+$('rtSubmit').addEventListener('click',()=>{ if(isMulti()&&rtState) mpSubmit('submit'); });
+$('rtFold').addEventListener('click',()=>{ if(isMulti()&&rtState) mpSubmit('fold'); });
 
 function renderSeats(winner){
   const layer=$('rtSeatLayer'); layer.innerHTML='';
@@ -1758,6 +1787,7 @@ $('winReload').onclick=()=>location.reload();
 
 /* ================= UI ================= */
 function updateUI(){
+  if(isMulti()) markInvDirty();
   $('hpTxt').textContent=Math.max(0,player.hp);
   $('hpFill').style.width=clamp(player.hp/player.maxHp*100,0,100)+'%';
   $('goldTxt').textContent=G(player.gold);
@@ -1801,7 +1831,9 @@ document.addEventListener('keydown',e=>{
     return;
   }
   if(k===' '){ e.preventDefault(); dig(); }
-  else if(k==='e'){ e.preventDefault(); const f=adjacentFoe(); if(f&&!busy()) openBattle(f); }
+  else if(k==='e'){ e.preventDefault();
+    if(isMulti()){ const f=adjacentRemoteFoe(); if(f&&!busy()) challenge(f); }
+    else { const f=adjacentFoe(); if(f&&!busy()) openBattle(f); } }
   else if(k==='c'){ e.preventDefault(); if(!busy()) openShop(); }
 });
 document.querySelectorAll('.dpad button').forEach(b=>{
@@ -1844,6 +1876,15 @@ const firebaseConfig = {
   measurementId: "G-0ZSWD6GZDX"
 };
 let fbReady=false;
+/* 접속 판정 기준 */
+const BEAT_MS=10000;      // 하트비트 주기
+const STALE_MS=40000;     // 이 시간 갱신 없으면 유령으로 간주
+const PURGE_MS=90000;     // 이 시간 넘으면 문서 삭제
+const ROOM_DEAD_MS=120000;// 방 활동이 끊긴 것으로 보는 시간
+let isKeeper=false, purgedRooms={};
+const nowMs=()=>Date.now();
+const tsOf=v=>{ try{ return v&&v.toMillis?v.toMillis():null; }catch(e){ return null; } };
+const SVT=()=>firebase.firestore.FieldValue.serverTimestamp();
 function initFirebase(){
   try{
     firebase.initializeApp(firebaseConfig);
@@ -1904,16 +1945,32 @@ function openLobby(){
   watchRooms(); loadMyStats();
 }
 function watchRooms(){
-  const un=db.collection('rooms').orderBy('createdAt','desc').limit(20)
+  const un=db.collection('rooms').orderBy('createdAt','desc').limit(30)
     .onSnapshot(snap=>{
       const box=$('roomList'); box.innerHTML='';
-      const rows=[];
+      const now=nowMs(), rows=[]; let hidden=0;
       snap.forEach(d=>{
         const r=d.data();
         if(r.status==='ended') return;
+        /* 활동 신호가 끊긴 방은 죽은 방으로 간주하고 숨김 */
+        const beat=tsOf(r.beat)||tsOf(r.createdAt);
+        const age=beat===null?0:now-beat;
+        if(age>ROOM_DEAD_MS){
+          hidden++;
+          /* 아주 오래된 방은 한 번만 정리 시도 */
+          if(age>ROOM_DEAD_MS*5&&!purgedRooms[d.id]){
+            purgedRooms[d.id]=1;
+            db.collection('rooms').doc(d.id).set({status:'ended'},{merge:true}).catch(()=>{});
+          }
+          return;
+        }
         rows.push({id:d.id,...r});
       });
-      if(!rows.length){ box.innerHTML='<div class="note">열려 있는 방이 없습니다. 새로 만들어 보세요.</div>'; return; }
+      if(!rows.length){
+        box.innerHTML='<div class="note">열려 있는 방이 없습니다. 새로 만들어 보세요.'
+          +(hidden?`<br><span style="opacity:.7">(활동이 끊긴 방 ${hidden}개는 숨겼습니다)</span>`:'')+'</div>';
+        return;
+      }
       rows.forEach(r=>{
         const row=document.createElement('div');
         row.className='room-row'+(r.status==='playing'?' playing':'');
@@ -1968,8 +2025,9 @@ async function joinRoom(id){
 async function enterRoomDoc(){
   await meRef().set({
     name:player.name, x:0, y:0, hp:player.hp, gold:player.gold, cards:0,
-    joinedAt:firebase.firestore.FieldValue.serverTimestamp()
+    joinedAt:SVT(), t:SVT()
   },{merge:true});
+  await roomRef().set({beat:SVT()},{merge:true}).catch(()=>{});
 }
 function openRoomView(){
   $('lobbyOverlay').classList.remove('show');
@@ -1990,38 +2048,83 @@ function openRoomView(){
 }
 function watchRoomPlayers(){
   const un=roomRef().collection('players').onSnapshot(snap=>{
+    const now=nowMs(), live=[], ghosts=[];
+    snap.forEach(d=>{
+      const p=d.data(), t=tsOf(p.t);
+      /* t가 아직 서버에 반영 전(null)이면 방금 들어온 것으로 간주 */
+      const age = t===null ? 0 : now-t;
+      if(age>STALE_MS) ghosts.push({id:d.id,age});
+      else live.push({id:d.id,...p});
+    });
+    /* 방 관리자 = 살아있는 참가자 중 uid가 가장 앞선 사람 */
+    const ids=live.map(p=>p.id).sort();
+    isKeeper = ids.length>0 && ids[0]===myUid;
+
     const box=$('roomPlayers');
     if(box){
-      box.innerHTML='';
-      snap.forEach(d=>{
-        const p=d.data();
-        const row=document.createElement('div');
-        row.className='prow';
-        row.innerHTML=`<span class="${d.id===myUid?'me':''}">${p.name}${d.id===myUid?' (나)':''}</span>
-          <span>🎴${p.cards||0} · 💰${(p.gold||0).toLocaleString()}</span>`;
-        box.appendChild(row);
-      });
+      box.innerHTML=live.map(p=>
+        `<div class="prow"><span class="${p.id===myUid?'me':''}">${p.name}${p.id===myUid?' (나)':''}
+         ${p.id===ids[0]?'<span class="host">방장</span>':''}</span>
+         <span>🎴${p.cards||0} · 💰${(p.gold||0).toLocaleString()}</span></div>`).join('')
+        ||'<div class="note">참가자를 기다리는 중…</div>';
     }
     remotes={};
-    snap.forEach(d=>{
-      if(d.id===myUid) return;
-      const p=d.data();
-      remotes[d.id]={name:p.name||'?',x:p.x||0,y:p.y||0,hp:p.hp||0,gold:p.gold||0,cards:p.cards||0};
+    live.forEach(p=>{
+      if(p.id===myUid) return;
+      remotes[p.id]={name:p.name||'?',x:p.x||0,y:p.y||0,hp:p.hp||0,gold:p.gold||0,cards:p.cards||0,invUntil:p.invUntil||0};
     });
     if(started){ render(); drawMinimap(); renderScore(); }
-    conn(`접속 ${snap.size}명`,'#7fd4e8');
+    conn(`접속 ${live.length}명${ghosts.length?' · 유령 '+ghosts.length:''}`,'#7fd4e8');
+
+    /* 오래된 유령 문서는 관리자만 정리 (쓰기 폭주 방지) */
+    if(isKeeper){
+      ghosts.forEach(g=>{
+        if(g.age>PURGE_MS){
+          roomRef().collection('players').doc(g.id).delete().catch(()=>{});
+        }
+      });
+    }
   },err=>console.error(err));
   unsubs.push(un);
 }
+
+/* 하트비트: 살아있음을 주기적으로 알림 */
+setInterval(()=>{
+  if(!isMulti()||!fbReady) return;
+  meRef().set({t:SVT()},{merge:true}).catch(()=>{});
+},BEAT_MS);
+
+/* 방 관리자 업무: 인원수 갱신 + 방 생존 신호 */
+setInterval(()=>{
+  if(!isMulti()||!fbReady||!isKeeper) return;
+  const count=1+Object.keys(remotes).length;
+  roomRef().set({count,beat:SVT()},{merge:true}).catch(()=>{});
+},15000);
 $('beginBtn').onclick=async()=>{
   try{ await roomRef().update({status:'playing'}); }
   catch(e){ toast('시작 실패: '+(e.code||e.message)); }
 };
-$('leaveRoomBtn').onclick=async()=>{
-  try{ if(roomId) await meRef().delete(); }catch(e){}
-  roomId=null; isHost=false; remotes={};
-  $('roomOverlay').classList.remove('show');
+/* 방에서 완전히 빠져나오기 */
+async function leaveRoom(){
+  const wasLast = Object.keys(remotes).length===0;
+  try{
+    if(roomId&&myUid) await meRef().delete();
+    /* 마지막 사람이면 방을 닫는다 */
+    if(roomId&&wasLast) await roomRef().set({status:'ended',count:0},{merge:true});
+  }catch(e){ console.error(e); }
+  unsubs.forEach(u=>{ try{ u(); }catch(e){} });
+  unsubs=[];
+  roomId=null; isHost=false; isKeeper=false; remotes={}; MODE='solo';
+  started=false; gameOver=false;
+  $('scoreWrap').style.display='none';
+  ['roomOverlay','shopOverlay','rtOverlay','packOverlay','battleOverlay','winOverlay']
+    .forEach(id=>$(id).classList.remove('show'));
+  conn('로비','#7fd4e8');
   openLobby();
+}
+$('leaveRoomBtn').onclick=leaveRoom;
+$('exitBtn').onclick=()=>{
+  if(confirm('로비로 나갈까요? 진행 중인 탐험 기록은 사라집니다.')) leaveRoom();
 };
 $('soloBtn').onclick=()=>startSolo();
 
@@ -2030,6 +2133,8 @@ function startSolo(){
   MODE='solo'; roomId=null; remotes={};
   ['authOverlay','lobbyOverlay','roomOverlay'].forEach(id=>$(id).classList.remove('show'));
   $('connBar').style.display='none';
+  $('exitBtn').style.display='none';
+  $('scoreWrap').style.display='none';
   started=true; init();
 }
 function beginGame(seed){
@@ -2038,10 +2143,13 @@ function beginGame(seed){
   started=true;
   init(seed);
   $('scoreWrap').style.display='block';
+  $('exitBtn').style.display='block';
   $('rtTimer').textContent='—';
   $('rtTimer').parentElement.title='원탁 단체배틀은 혼자 하기 모드에서만 지원됩니다';
-  watchDigs();
+  watchDigs(); watchDuels(); watchRT();
+  restoreInv();
   syncMe(true);
+  if(isHost) roomRef().set({rtNext:nowMs()+ROUNDTABLE_SEC*1000},{merge:true}).catch(()=>{});
   db.collection('users').doc(myUid).set({
     games:firebase.firestore.FieldValue.increment(1)
   },{merge:true}).catch(()=>{});
@@ -2082,7 +2190,7 @@ function syncMe(force){
   lastSent=sig;
   meRef().set({
     name:player.name,x:player.x,y:player.y,hp:player.hp,
-    gold:player.gold,cards:player.cards.length
+    gold:player.gold,cards:player.cards.length,t:SVT()
   },{merge:true}).catch(e=>console.error(e));
 }
 setInterval(()=>{ if(started&&isMulti()) syncMe(); },500);
@@ -2099,7 +2207,17 @@ setInterval(()=>{
 },20000);
 
 window.addEventListener('beforeunload',()=>{
-  try{ if(isMulti()) meRef().delete(); }catch(e){}
+  try{
+    if(!isMulti()) return;
+    meRef().delete();
+    if(Object.keys(remotes).length===0) roomRef().set({status:'ended',count:0},{merge:true});
+  }catch(e){}
+});
+/* 탭이 다시 보이면 즉시 하트비트 (모바일 복귀 대응) */
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&isMulti()&&fbReady){
+    meRef().set({t:SVT()},{merge:true}).catch(()=>{});
+  }
 });
 
 /* ---------- 접속자 점수판 ---------- */
@@ -2113,6 +2231,685 @@ function renderScore(){
      <span>🎴${p.cards} · 💰${(p.gold||0).toLocaleString()}</span></div>`).join('');
 }
 setInterval(()=>{ if(started&&isMulti()) renderScore(); },1000);
+
+/* ==================================================================
+   멀티플레이 1:1 배틀
+   상대 칸에 인접해 도전하면 duels 문서를 만들고, 양쪽이 베팅을 적는다.
+   승패는 양쪽이 동일한 입력으로 각자 계산하고, 카드 이동은
+   패자가 잃을 카드를 문서에 적으면 승자가 그것을 받아가는 방식.
+   ================================================================== */
+const DUEL_MS=9000;
+let duel=null, duelApplied={};
+
+function adjacentRemoteFoe(){
+  if(inShop(player)) return null;
+  const now=nowMs();
+  for(const uid in remotes){
+    const r=remotes[uid];
+    if(r.invUntil&&r.invUntil>now) continue;
+    if(shopAt[idx(r.x,r.y)]) continue;
+    if(Math.abs(r.x-player.x)<=1&&Math.abs(r.y-player.y)<=1) return {uid,...r};
+  }
+  return null;
+}
+async function challenge(foe){
+  if(duel) return;
+  const id=[myUid,foe.uid].sort().join('-')+'-'+Date.now();
+  try{
+    await roomRef().collection('duels').doc(id).set({
+      a:myUid,b:foe.uid,aName:player.name,bName:foe.name,
+      bets:{},status:'open',deadline:nowMs()+DUEL_MS,createdAt:SVT()
+    });
+  }catch(e){ toast('도전 실패: '+(e.code||e.message)); }
+}
+function watchDuels(){
+  const un=roomRef().collection('duels').orderBy('createdAt','desc').limit(8)
+    .onSnapshot(snap=>{
+      snap.forEach(d=>{
+        const v=d.data();
+        if(v.a!==myUid&&v.b!==myUid) return;
+        if(v.status==='open'||v.status==='resolving'){
+          if(!duel||duel.id!==d.id) openDuel(d.id,v);
+          else handleDuel(d.id,v);
+        }else if(duel&&duel.id===d.id){
+          if(v.status==='fled'&&v.fledBy!==myUid){
+            digMsg('상대가 물러났습니다','none');
+            closeDuel();
+          }else if(v.status==='done'){ closeDuel(); }
+        }
+      });
+    },err=>console.error(err));
+  unsubs.push(un);
+}
+function openDuel(id,v){
+  if(gameOver) return;
+  duel={id,opp:(v.a===myUid?v.b:v.a),oppName:(v.a===myUid?v.bName:v.aName),isA:v.a===myUid};
+  duelApplied[id]={};
+  battleFoe={name:duel.oppName,hp:remotes[duel.opp]?remotes[duel.opp].hp:100,
+             cards:[],isRemote:true};
+  $('betScreen').style.display='block'; $('resultScreen').style.display='none';
+  $('battleWho').innerHTML=`<b style="color:#9fd8f0">「${duel.oppName}」</b>와(과)의 체력 베팅 대전`;
+  $('myHp').textContent=player.hp;
+  $('foeHp').textContent=battleFoe.hp;
+  $('foeCards').textContent=remotes[duel.opp]?remotes[duel.opp].cards:'?';
+  const max=Math.max(1,player.hp-1), def=Math.min(10,max);
+  $('betInput').max=max; $('betRange').max=max;
+  $('betInput').value=def; $('betRange').value=def;
+  $('betMaxLabel').textContent=`최대 ${max}`;
+  $('betConfirm').disabled=false;
+  $('betOverlayNote')&&($('betOverlayNote').textContent='');
+  $('battleOverlay').classList.add('show');
+  startDuelTimer(v.deadline);
+  handleDuel(id,v);
+}
+let duelTimer=null;
+function startDuelTimer(deadline){
+  clearInterval(duelTimer);
+  duelTimer=setInterval(()=>{
+    const left=(deadline-nowMs())/1000;
+    if(left<=0){
+      clearInterval(duelTimer);
+      $('timerTxt').textContent='0.0s'; $('timerFill').style.width='0%';
+      if(duel&&!$('betConfirm').disabled) duelFlee(true);
+      return;
+    }
+    $('timerTxt').textContent=left.toFixed(1)+'s';
+    $('timerFill').style.width=clamp(left/(DUEL_MS/1000)*100,0,100)+'%';
+  },100);
+}
+async function duelBet(){
+  const max=Math.max(1,player.hp-1);
+  const bet=parseInt($('betInput').value,10);
+  if(isNaN(bet)||bet<1||bet>max){ toast('베팅 값을 확인하세요'); return; }
+  $('betConfirm').disabled=true;
+  $('rtPreview')&&0;
+  try{
+    await roomRef().collection('duels').doc(duel.id)
+      .set({bets:{[myUid]:bet}},{merge:true});
+    $('battleWho').innerHTML=`<b style="color:#9fd8f0">${duel.oppName}</b>의 베팅을 기다리는 중…`;
+  }catch(e){ toast('베팅 실패'); $('betConfirm').disabled=false; }
+}
+async function duelFlee(auto){
+  if(!duel) return;
+  clearInterval(duelTimer);
+  player.hp-=5;
+  setInvul();
+  try{
+    await roomRef().collection('duels').doc(duel.id)
+      .set({status:'fled',fledBy:myUid},{merge:true});
+  }catch(e){}
+  log(`${duel.oppName}에게서 ${auto?'시간이 지나 자동으로 ':''}물러났습니다 · 체력 -5`);
+  closeDuel(); checkDown(); updateUI();
+}
+function handleDuel(id,v){
+  const bets=v.bets||{};
+  const mine=bets[myUid], theirs=bets[duel.opp];
+  if(mine===undefined||theirs===undefined) return;
+  const ap=duelApplied[id]||(duelApplied[id]={});
+  clearInterval(duelTimer);
+
+  /* 체력 차감은 한 번만 */
+  if(!ap.hp){ ap.hp=1; player.hp-=mine; setInvul(); updateUI(); }
+
+  if(mine<theirs){
+    /* 패배: 잃을 카드를 골라 문서에 적는다 */
+    if(!ap.loot){
+      ap.loot=1;
+      let lootCard=null;
+      const sh=player.items.indexOf('손실방어');
+      if(sh>=0){ player.items.splice(sh,1); }
+      else if(player.cards.length){
+        const top=[...player.cards].sort((a,b)=>b.month-a.month).slice(0,10);
+        lootCard=top[Math.floor(Math.random()*top.length)];
+        const i=player.cards.findIndex(x=>x.id===lootCard.id);
+        if(i>=0) player.cards.splice(i,1);
+      }else{ player.gold=Math.max(0,player.gold-10); }
+      updateUI();
+      roomRef().collection('duels').doc(id)
+        .set({loot:lootCard?JSON.parse(JSON.stringify(lootCard)):null,
+              shielded:sh>=0,status:'resolving'},{merge:true}).catch(()=>{});
+      if(lootCard) logTransfer(duel.opp,lootCard,'duel');
+      markInvDirty();
+      showDuelResult('lose',mine,theirs,
+        sh>=0?'손실방어를 소모해 카드를 지켰습니다'
+             :(lootCard?`${cardLabel(lootCard)} 카드를 빼앗겼습니다`:'카드가 없어 10G를 잃었습니다'));
+    }
+  }else if(mine>theirs){
+    /* 승리: 상대가 loot를 적을 때까지 기다렸다가 받는다 */
+    if(v.status==='resolving'&&!ap.got){
+      ap.got=1;
+      let msg;
+      if(v.shielded) msg='상대가 손실방어를 써서 카드를 지켰습니다';
+      else if(v.loot){ giveCard(player,v.loot); msg=`${cardLabel(v.loot)} 카드를 빼앗았습니다`; }
+      else { player.gold+=15; msg='상대에게 카드가 없어 15G를 챙겼습니다'; }
+      updateUI();
+      showDuelResult('win',mine,theirs,msg);
+      roomRef().collection('duels').doc(id).set({status:'done'},{merge:true}).catch(()=>{});
+    }else if(!ap.wait){
+      ap.wait=1;
+      showDuelResult('win',mine,theirs,'전리품을 정산하는 중…');
+    }
+  }else{
+    if(!ap.draw){
+      ap.draw=1;
+      showDuelResult('draw',mine,theirs,'체력만 소모했습니다');
+      if(duel.isA) roomRef().collection('duels').doc(id).set({status:'done'},{merge:true}).catch(()=>{});
+    }
+  }
+}
+function showDuelResult(verdict,mine,theirs,spoils){
+  $('betScreen').style.display='none'; $('resultScreen').style.display='block';
+  $('resultIcon').textContent=verdict==='win'?'🏆':verdict==='lose'?'💀':'🤝';
+  const vt=$('verdictTxt'); vt.className='verdict '+verdict;
+  vt.textContent=verdict==='win'?'승 리':verdict==='lose'?'패 배':'무승부';
+  $('winnerLine').innerHTML=verdict==='draw'?'양쪽이 같은 체력을 걸었습니다'
+    :`<b>${verdict==='win'?player.name:duel.oppName}</b>의 승리`;
+  $('myBetAmt').textContent=mine; $('foeBetAmt').textContent=theirs;
+  $('foeNameLbl').textContent=duel.oppName;
+  $('sideMe').className='bet-side'+(verdict==='win'?' victor':'');
+  $('sideFoe').className='bet-side'+(verdict==='lose'?' victor':'');
+  $('myTag').textContent=verdict==='win'?'WINNER':'체력 -'+mine;
+  $('foeTag').textContent=verdict==='lose'?'WINNER':'체력 -'+theirs;
+  $('spoilsTxt').textContent=spoils;
+  log(`⚔️ ${duel.oppName} · ${mine} vs ${theirs} · ${verdict==='win'?'승리':verdict==='lose'?'패배':'무승부'}`);
+}
+function closeDuel(){
+  clearInterval(duelTimer);
+  duel=null; battleFoe=null;
+  $('battleOverlay').classList.remove('show');
+  checkDown(); refreshActions();
+}
+function setInvul(){
+  player.invulUntil=nowMs()+INVUL_MS;
+  if(isMulti()) meRef().set({invUntil:player.invulUntil},{merge:true}).catch(()=>{});
+}
+
+/* ==================================================================
+   멀티플레이 원탁 단체배틀
+   방 관리자(keeper)가 심판이 되어 rt/state 를 갱신하고,
+   각 플레이어는 rt/acts/{uid} 에 자기 행동만 제출한다.
+   ================================================================== */
+const RT_ACT_MS=15000, RT_REVEAL_MS=6000;
+let rtState=null, rtApplied={}, mpSel=[], rtNextAt=0;
+const rtStateRef=()=>roomRef().collection('rt').doc('state');
+const rtActRef=u=>roomRef().collection('rt').doc('state').collection('acts').doc(u);
+
+function watchRT(){
+  unsubs.push(rtStateRef().onSnapshot(d=>{
+    rtState=d.exists?d.data():null;
+    renderMPRT();
+  },err=>console.error(err)));
+  unsubs.push(roomRef().onSnapshot(d=>{
+    if(!d.exists) return;
+    const r=d.data();
+    if(r.rtNext) rtNextAt=r.rtNext;
+  }));
+}
+/* 남은 시간 표시 + 관리자의 원탁 개시 */
+setInterval(()=>{
+  if(!started||!isMulti()||gameOver) return;
+  if(!rtNextAt){ $('rtTimer').textContent='—'; return; }
+  const left=Math.ceil((rtNextAt-nowMs())/1000);
+  $('rtTimer').textContent=Math.max(0,left);
+  $('rtTimer').style.color=left<=10?'#ff9a8c':'';
+  if(left===30) announce('30초 후 원탁 단체배틀이 시작됩니다!');
+  if(left===5) announce('5초 후 원탁 단체배틀이 시작됩니다!');
+  if(left<=0&&isKeeper&&(!rtState||rtState.phase==='end')) mpStartRT();
+},1000);
+
+/* ---------- 관리자: 원탁 시작 ---------- */
+async function mpStartRT(){
+  const parts=[];
+  if(player.cards.length>0) parts.push({uid:myUid,name:player.name});
+  for(const uid in remotes) if(remotes[uid].cards>0) parts.push({uid,name:remotes[uid].name});
+  if(parts.length<2){
+    await roomRef().set({rtNext:nowMs()+ROUNDTABLE_SEC*1000},{merge:true});
+    log('참가자가 부족해 원탁이 열리지 않았습니다');
+    return;
+  }
+  const old=await rtStateRef().collection('acts').get().catch(()=>null);
+  if(old) old.forEach(d=>d.ref.delete().catch(()=>{}));
+  await rtStateRef().set({
+    phase:'lead', round:1, parts, prize:rollPrize(),
+    picks:null, order:null, active:null, cur:null, turn:null,
+    winner:null, deadline:nowMs()+RT_ACT_MS, logs:[]
+  });
+  await roomRef().set({rtNext:0},{merge:true});
+}
+/* ---------- 관리자: 상태 진행 ---------- */
+setInterval(async()=>{
+  if(!started||!isMulti()||!isKeeper||!rtState||gameOver) return;
+  const st=rtState, now=nowMs();
+  try{
+    if(st.phase==='lead'){
+      const snap=await rtStateRef().collection('acts').get();
+      const picks={};
+      snap.forEach(d=>{ const a=d.data(); if(a.round===st.round&&a.type==='lead') picks[d.id]=a.card; });
+      const need=st.parts.map(p=>p.uid);
+      const all=need.every(u=>picks[u]);
+      if(all||now>st.deadline){
+        /* 미제출자는 자동 제외 */
+        const parts=st.parts.filter(p=>picks[p.uid]);
+        if(parts.length<2){ await mpEndRT(null,'참가자가 부족해 무효가 되었습니다'); return; }
+        await rtStateRef().set({phase:'reveal',picks,parts,deadline:now+RT_REVEAL_MS},{merge:true});
+      }
+    }
+    else if(st.phase==='reveal'&&now>st.deadline){
+      const months={}; let max=-1;
+      st.parts.forEach(p=>{ const c=st.picks[p.uid]; if(c){ months[p.uid]=c.month; max=Math.max(max,c.month); } });
+      const tops=st.parts.filter(p=>months[p.uid]===max);
+      await rtStateRef().collection('acts').get().then(s=>s.forEach(d=>d.ref.delete().catch(()=>{})));
+      if(tops.length>1){
+        await rtStateRef().set({phase:'lead',round:(st.round||1)+1,picks:null,
+          deadline:now+RT_ACT_MS,logs:[...(st.logs||[]),`${max}월 동점 ${tops.length}명 · 재경기`]},{merge:true});
+      }else{
+        const li=st.parts.findIndex(p=>p.uid===tops[0].uid);
+        const order=st.parts.slice(li).concat(st.parts.slice(0,li)).map(p=>p.uid);
+        await rtStateRef().set({phase:'play',order,active:order,cur:null,turn:order[0],
+          picks:null,deadline:now+RT_ACT_MS,
+          logs:[...(st.logs||[]),`${tops[0].name}이(가) 선이 되었습니다`]},{merge:true});
+      }
+    }
+    else if(st.phase==='play'){
+      const actDoc=await rtActRef(st.turn).get();
+      const act=actDoc.exists?actDoc.data():null;
+      if(act&&act.type&&act.seq===(st.seq||0)){
+        await rtActRef(st.turn).delete().catch(()=>{});
+        await mpApplyAct(st,act);
+      }else if(now>st.deadline){
+        await rtActRef(st.turn).delete().catch(()=>{});
+        await mpApplyAct(st,{type:'fold',auto:true});
+      }
+    }
+  }catch(e){ console.error('RT keeper',e); }
+},900);
+
+async function mpApplyAct(st,act){
+  const uid=st.turn, nameOf=u=>(st.parts.find(p=>p.uid===u)||{}).name||'?';
+  let active=[...(st.active||[])], order=[...(st.order||[])], cur=st.cur, logs=[...(st.logs||[])];
+  const now=nowMs();
+
+  if(act.type==='fold'){
+    active=active.filter(u=>u!==uid);
+    logs.push(`${nameOf(uid)} 포기${act.auto?' (시간 초과)':''}`);
+  }else if(act.type==='play'){
+    const j=judgeSel(act.cards,cur?{name:cur.name,rank:cur.rank}:null);
+    if(!j.ok){
+      active=active.filter(u=>u!==uid);
+      logs.push(`${nameOf(uid)} 무효 제시로 포기 처리`);
+    }else if(j.redeal){
+      logs.push(`${nameOf(uid)} ${j.name} 선언 · 2라운드 재시작`);
+      const li=order.indexOf(uid);
+      order=order.slice(li).concat(order.slice(0,li));
+      active=order.filter(u=>active.includes(u));
+      cur=null;
+      await rtStateRef().set({order,active,cur:null,turn:order[0],
+        deadline:now+RT_ACT_MS,logs,seq:(st.seq||0)+1,lastPlay:null},{merge:true});
+      return;
+    }else{
+      cur={name:j.name,rank:j.rank,by:uid,byName:nameOf(uid),cards:act.cards};
+      logs.push(`${nameOf(uid)} ${act.cards.map(cardLabel).join(' + ')} → ${j.name}`);
+    }
+  }
+  if(active.length<=1){ await mpEndRT(active[0]||null); return; }
+  /* 다음 차례 */
+  let i=order.indexOf(uid);
+  for(let k=1;k<=order.length;k++){
+    const nx=order[(i+k)%order.length];
+    if(active.includes(nx)){
+      await rtStateRef().set({active,order,cur,turn:nx,deadline:now+RT_ACT_MS,
+        logs,seq:(st.seq||0)+1,lastPlay:act.type==='play'?{uid,cards:act.cards}:null},{merge:true});
+      return;
+    }
+  }
+  await mpEndRT(active[0]||null);
+}
+async function mpEndRT(winnerUid,msg){
+  const st=rtState||{};
+  const nm=(st.parts||[]).find(p=>p.uid===winnerUid);
+  await rtStateRef().set({phase:'end',winner:winnerUid||null,
+    winnerName:nm?nm.name:null,turn:null,
+    logs:[...(st.logs||[]),msg||(nm?`${nm.name} 승리 · 상품 획득`:'무효')]},{merge:true});
+  await roomRef().set({rtNext:nowMs()+ROUNDTABLE_SEC*1000},{merge:true});
+}
+
+/* ---------- 클라이언트 렌더 ---------- */
+function mpSeatPos(i,n){
+  const a=(90+i*360/n)*Math.PI/180;
+  return {x:50+43*Math.cos(a), y:50+41*Math.sin(a)};
+}
+function renderMPRT(){
+  if(!isMulti()) return;
+  const st=rtState;
+  if(!st||st.phase==='idle'){ $('rtOverlay').classList.remove('show'); return; }
+  const key=`${st.phase}:${st.round||0}:${st.seq||0}`;
+  $('rtOverlay').classList.add('show');
+  $('rtPrize').innerHTML=`이번 원탁의 상품 · <b>${st.prize?st.prize.text:'—'}</b>`;
+  $('rtLog').innerHTML=(st.logs||[]).slice(-8).reverse().map(l=>`<div>${l}</div>`).join('');
+  $('rtEnd').style.display=st.phase==='end'?'block':'none';
+
+  /* 좌석 */
+  const parts=st.parts||[], layer=$('rtSeatLayer'); layer.innerHTML='';
+  parts.forEach((p,i)=>{
+    const pos=mpSeatPos(i,parts.length);
+    const folded=st.phase==='play'&&st.active&&!st.active.includes(p.uid);
+    const turn=st.turn===p.uid;
+    const cnt=p.uid===myUid?player.cards.length:(remotes[p.uid]?remotes[p.uid].cards:'?');
+    const d=document.createElement('div');
+    d.className='seat'+(turn?' turn':'')+(folded?' folded':'')+(st.winner===p.uid?' win':'');
+    d.style.left=pos.x+'%'; d.style.top=pos.y+'%';
+    d.innerHTML=`<div class="sn">${p.uid===myUid?'나':p.name}</div>
+      <div class="sh">🎴${cnt}</div>
+      ${st.order&&st.order[0]===p.uid?'<span class="bd lead">선</span>':''}
+      ${folded?'<span class="bd">포기</span>':''}`;
+    layer.appendChild(d);
+  });
+
+  if(st.phase==='lead'){
+    $('rtTitle').textContent='원탁 · 선 정하기';
+    $('rtWho').textContent='상대에게 보이지 않게 1장을 냅니다. 가장 높은 월이 선이 됩니다.';
+    $('rtCardLayer').innerHTML=''; centerInfo('');
+    const joined=(st.parts||[]).some(p=>p.uid===myUid);
+    if(!joined){ mpSpectate('낼 카드가 없어 이번 원탁은 관전합니다'); return; }
+    if(rtApplied[key]==='sent'){ mpWait('다른 탐험가를 기다리는 중…'); return; }
+    mpShowPicks('lead',st.deadline);
+  }
+  else if(st.phase==='reveal'){
+    $('rtTitle').textContent='원탁 · 공개';
+    $('rtPlayArea').style.display='none'; stopAct();
+    if(rtApplied[key]!=='rev'){
+      rtApplied[key]='rev';
+      mpRevealLead(st);
+      const mine=st.picks&&st.picks[myUid];
+      if(mine){ const i=player.cards.findIndex(c=>c.id===mine.id); if(i>=0){ player.cards.splice(i,1); updateUI(); syncMe(true);} }
+    }
+  }
+  else if(st.phase==='play'){
+    $('rtTitle').textContent='원탁 · 족보 대결';
+    $('rtWho').textContent='시계방향으로 더 높은 족보를 제시하거나 포기합니다.';
+    if(st.cur){
+      centerInfo(st.cur.name,`${st.cur.byName} · ${(st.cur.cards||[]).map(cardLabel).join(' + ')}`);
+      if(rtApplied['cards:'+(st.seq||0)]!=='shown'){
+        rtApplied['cards:'+(st.seq||0)]='shown';
+        mpShowPlayed(st);
+      }
+    }else{ centerInfo(''); $('rtCardLayer').innerHTML=''; }
+    const turnName=(parts.find(p=>p.uid===st.turn)||{}).name||'?';
+    $('rtSub').innerHTML=st.cur
+      ? `현재 최고 <b style="color:var(--gold-bright)">${st.cur.name}</b> · <b>${st.turn===myUid?'내':turnName}</b> 차례`
+      : `<b>${st.turn===myUid?'내가':turnName+'가'}</b> 첫 족보를 제시합니다`;
+    if(st.turn===myUid&&st.active&&st.active.includes(myUid)){
+      if(rtApplied[key]!=='sent') mpShowPicks('play',st.deadline);
+      else mpWait('제출 완료 · 진행을 기다리는 중…');
+    }else mpWait(null);
+  }
+  else if(st.phase==='end'){
+    $('rtTitle').textContent='원탁 종료';
+    $('rtPlayArea').style.display='none'; stopAct();
+    $('rtSub').textContent='';
+    centerInfo(st.winnerName?`${st.winnerName} 승리`:'무효',
+               st.winnerName?`상품 · ${st.prize?st.prize.text:''}`:'상품을 가져간 사람이 없습니다');
+    if(st.winner===myUid&&rtApplied['prize:'+(st.round||0)]!=='got'){
+      rtApplied['prize:'+(st.round||0)]='got';
+      const pz=st.prize;
+      if(pz&&pz.type==='gold'){ player.gold+=pz.amount; log(`🏛 원탁 상품 · ${G(pz.amount)}`); }
+      else if(pz){ const c=giveCard(player,cardOf(pz.month)); log(`🏛 원탁 상품 · ${cardLabel(c)}`); showLootCards([c]); }
+      updateUI(); markInvDirty(); syncMe(true);
+    }
+  }
+}
+function mpSpectate(msg){
+  $('rtPlayArea').style.display='none'; stopAct();
+  $('rtSub').innerHTML=`<span style="color:var(--dim)">${msg}</span>`;
+}
+function mpWait(msg){
+  $('rtPlayArea').style.display='none'; stopAct();
+  if(msg) $('rtSub').innerHTML=`<span style="color:var(--dim)">${msg}</span>`;
+}
+function mpShowPicks(mode,deadline){
+  $('rtPlayArea').style.display='block';
+  $('rtFold').style.display=mode==='play'?'block':'none';
+  mpSel=[];
+  const zone=$('rtPicks'); zone.innerHTML='';
+  const pool=mode==='lead'?player.cards:usable(player);
+  if(pool.length<(mode==='lead'?1:2)){
+    zone.innerHTML='<div class="note">낼 수 있는 카드가 부족합니다.</div>';
+    $('rtSubmit').disabled=true;
+    if(mode==='play') setTimeout(()=>mpSubmit('fold'),600);
+    return;
+  }
+  groupCards(pool).forEach(g=>{
+    const w=document.createElement('div'); w.className='pkw';
+    const e=document.createElement('div');
+    e.className='pick'; e.dataset.id=g.c.id; e.title=cardLabel(g.c);
+    paintCard(e,g.c); w.appendChild(e);
+    if(g.n>1){ const q=document.createElement('span'); q.className='qty'; q.textContent='×'+g.n; w.appendChild(q); }
+    e.onclick=()=>{
+      const i=mpSel.findIndex(x=>x.id===g.c.id);
+      if(i>=0) mpSel.splice(i,1);
+      else{ const cap=mode==='lead'?1:3; if(mpSel.length>=cap) mpSel.shift(); mpSel.push(g.c); }
+      [...zone.querySelectorAll('.pick')].forEach(el=>
+        el.classList.toggle('sel',mpSel.some(s=>s.id===el.dataset.id)));
+      mpPreview(mode);
+    };
+    zone.appendChild(w);
+  });
+  mpPreview(mode);
+  const left=Math.max(1,Math.round((deadline-nowMs())/1000));
+  startActUntil(left,()=>mpSubmit(mode==='lead'?'leadAuto':'fold'));
+}
+function mpPreview(mode){
+  const pv=$('rtPreview');
+  if(mode==='lead'){
+    if(!mpSel.length){ pv.textContent='카드 1장을 고르세요'; $('rtSubmit').disabled=true; return; }
+    pv.innerHTML=`<b class="ok">${cardLabel(mpSel[0])}</b> 제시`;
+    $('rtSubmit').disabled=false; return;
+  }
+  if(mpSel.length<2){ pv.textContent=`2~3장을 고르세요 (${mpSel.length}/2)`; $('rtSubmit').disabled=true; return; }
+  const cur=rtState&&rtState.cur?{name:rtState.cur.name,rank:rtState.cur.rank}:null;
+  const j=judgeSel(mpSel,cur);
+  pv.innerHTML=j.ok?`<b class="ok">${j.name}</b> ${j.note||'제시 가능'}`
+                   :`<b class="no">${j.name||'불가'}</b> ${j.reason}${j.hint?' · '+j.hint:''}`;
+  $('rtSubmit').disabled=!j.ok;
+}
+async function mpSubmit(kind){
+  const st=rtState; if(!st) return;
+  const key=`${st.phase}:${st.round||0}:${st.seq||0}`;
+  if(rtApplied[key]==='sent') return;
+  stopAct();
+  try{
+    if(st.phase==='lead'){
+      let card=mpSel[0];
+      if(kind==='leadAuto'||!card){
+        const normal=player.cards.filter(c=>!isSpecialCard(c));
+        const src=normal.length?normal:player.cards;
+        if(!src.length) return;
+        const min=Math.min(...src.map(c=>c.month));
+        const pool=src.filter(c=>c.month===min);
+        card=pool[Math.floor(Math.random()*pool.length)];
+      }
+      rtApplied[key]='sent';
+      await rtActRef(myUid).set({type:'lead',round:st.round||1,
+        card:JSON.parse(JSON.stringify(card))});
+      mpWait('다른 탐험가를 기다리는 중…');
+    }else{
+      rtApplied[key]='sent';
+      if(kind==='fold'){
+        await rtActRef(myUid).set({type:'fold',seq:st.seq||0});
+      }else{
+        const cards=mpSel.map(c=>JSON.parse(JSON.stringify(c)));
+        cards.forEach(c=>{ const i=player.cards.findIndex(x=>x.id===c.id); if(i>=0) player.cards.splice(i,1); });
+        updateUI(); syncMe(true);
+        await rtActRef(myUid).set({type:'play',seq:st.seq||0,cards});
+      }
+      mpWait('제출 완료 · 진행을 기다리는 중…');
+    }
+  }catch(e){ console.error(e); toast('제출 실패'); rtApplied[key]=null; }
+}
+/* 공개 애니메이션 */
+function mpRevealLead(st){
+  $('rtCardLayer').innerHTML='';
+  const parts=st.parts||[], n=parts.length;
+  centerInfo('공 개','한 장씩 뒤집습니다');
+  const els=[];
+  parts.forEach((p,i)=>{
+    const c=st.picks&&st.picks[p.uid]; if(!c) return;
+    const el=makeRC(mpSeatPos(i,n),p.uid===myUid?'나':p.name);
+    moveRC(el,centerSlot(els.length,n));
+    els.push({el,c,p});
+  });
+  setTimeout(()=>{
+    els.forEach((o,i)=>setTimeout(()=>revealRC(o.el,o.c),i*560));
+    setTimeout(()=>{
+      const max=Math.max(...els.map(o=>o.c.month));
+      els.forEach(o=>{ if(o.c.month===max) o.el.classList.add('hi'); });
+      const tops=els.filter(o=>o.c.month===max);
+      centerInfo(tops.length>1?`${max}월 동점!`:`${tops[0].p.name} 선!`,
+                 tops.length>1?'제시한 카드는 소멸 · 재경기':`${max}월로 가장 높은 패`);
+    },els.length*560+400);
+  },700);
+}
+function mpShowPlayed(st){
+  $('rtCardLayer').innerHTML='';
+  const parts=st.parts||[], n=parts.length;
+  const si=parts.findIndex(p=>p.uid===st.cur.by);
+  const cards=st.cur.cards||[];
+  cards.forEach((c,k)=>{
+    const el=makeRC(mpSeatPos(si<0?0:si,n),k===0?st.cur.byName:'');
+    moveRC(el,centerSlot(k,cards.length));
+    setTimeout(()=>revealRC(el,c),600+k*220);
+  });
+}
+/* 15초 카운트다운 (남은 시간 기준) */
+function startActUntil(sec,onTimeout){
+  clearInterval(actTimer); actLeft=sec;
+  $('rtAct').style.display='block';
+  const draw=()=>{
+    $('rtActTxt').textContent=Math.max(0,actLeft).toFixed(0)+'s';
+    $('rtActFill').style.width=clamp(actLeft/RT_ACT_MS*1000*100,0,100)+'%';
+  };
+  draw();
+  actTimer=setInterval(()=>{
+    actLeft-=0.1;
+    if(actLeft<=0){ stopAct(); onTimeout(); return; }
+    draw();
+  },100);
+}
+
+/* ==================================================================
+   서버 측 소유권 관리 (보안 규칙 기반)
+   · tiles/{i} : 최초 1회만 생성 가능 → 같은 칸을 두 번 캘 수 없음
+   · inv/{uid} : 본인만 읽고 쓰기 → 남이 내 카드를 조작할 수 없음
+   · xfer/{id} : 넘기는 사람만 기록 가능 → 일방적 강탈 불가
+   ================================================================== */
+const invRef=()=>roomRef().collection('inv').doc(myUid);
+let invDirty=false;
+
+function markInvDirty(){ invDirty=true; }
+setInterval(()=>{
+  if(!isMulti()||!invDirty||!fbReady) return;
+  invDirty=false;
+  invRef().set({
+    cards:JSON.parse(JSON.stringify(player.cards)),
+    items:player.items.slice(),
+    gold:player.gold, hp:player.hp, t:SVT()
+  },{merge:true}).catch(e=>console.error('inv',e));
+},1500);
+
+/* 방 입장 시 이전 인벤토리 복구 */
+async function restoreInv(){
+  try{
+    const d=await invRef().get();
+    if(!d.exists) return false;
+    const v=d.data();
+    if(Array.isArray(v.cards)) player.cards=v.cards;
+    if(Array.isArray(v.items)) player.items=v.items;
+    if(typeof v.gold==='number') player.gold=v.gold;
+    if(typeof v.hp==='number'&&v.hp>0) player.hp=v.hp;
+    updateUI();
+    log('이전 진행 상황을 불러왔습니다.');
+    return true;
+  }catch(e){ console.error('restore',e); return false; }
+}
+/* 타일 선점: 이미 있으면 규칙이 거부 → 먼저 판 사람이 임자 */
+async function claimTile(i){
+  try{
+    await roomRef().collection('tiles').doc(String(i)).set({uid:myUid,t:SVT()});
+    return true;
+  }catch(e){ return false; }
+}
+async function mpDig(i,auto){
+  const sp=SPECIAL[tiles[i]];
+  if(sp){ return mpDigGrave(i,sp); }
+  player.gold-=1; updateUI();
+  const ok=await claimTile(i);
+  if(!ok){
+    if(!dug[i]){ dug[i]=1; dugCount++; }
+    digMsg('한발 늦었습니다 · 이미 파간 자리','warn');
+    render(); drawMinimap(); updateUI(); markInvDirty();
+    return;
+  }
+  const res=resolveTile(i);
+  digMsg(res.t,res.k); log(`⛏ ${res.t}`);
+  if(player.digBoostUntil>Date.now()){
+    let extra=0;
+    for(const [dx,dy] of [[0,-1],[0,1],[-1,0],[1,0]]){
+      const nx=player.x+dx, ny=player.y+dy;
+      if(nx<0||ny<0||nx>=MAP||ny>=MAP) continue;
+      const j=idx(nx,ny);
+      if(shopAt[j]||dug[j]||tiles[j]>=4) continue;
+      if(await claimTile(j)){ const r2=resolveTile(j); extra++; log(`　↳ 추가 채굴 · ${r2.t}`); }
+    }
+    if(extra) digMsg(`⚡ 인접 ${extra}칸 추가 채굴`,'item');
+  }
+  render(); drawMinimap(); updateUI(); markInvDirty(); syncMe(true);
+}
+/* 무덤·미궁은 여러 명이 함께 파므로 누적 횟수를 트랜잭션으로 공유 */
+async function mpDigGrave(i,sp){
+  player.gold-=1; updateUI();
+  let done=false, n=0;
+  try{
+    await db.runTransaction(async tx=>{
+      const ref=roomRef().collection('graves').doc(String(i));
+      const d=await tx.get(ref);
+      const cur=d.exists?(d.data().n||0):0;
+      if(d.exists&&d.data().done){ done=false; n=sp.need; return; }
+      n=cur+1;
+      if(n>=sp.need){ done=true; tx.set(ref,{n,done:true,by:myUid}); }
+      else tx.set(ref,{n},{merge:true});
+    });
+  }catch(e){ console.error('grave',e); }
+  digCnt[i]=n;
+  if(!done){
+    digMsg(`${sp.icon} ${sp.n} 채굴 ${n}/${sp.need}`,'none');
+    render(); updateUI(); return;
+  }
+  markDug(i); delete digCnt[i];
+  const r=tileRngAt(i);
+  if(tiles[i]===4){
+    const cnt=5+Math.floor(r()*6), got=[];
+    for(let k=0;k<cnt;k++) got.push(giveCard(player,rollCardR(r,'g'+i+'-'+k)));
+    digMsg(`🪦 카드무덤! 카드 ${cnt}장 획득`,'card');
+    log(`🪦 카드무덤 · ${fmtCards(got)}`); showLootCards(got);
+  }else if(tiles[i]===5){
+    const base=3+countItem('세공증')+Math.floor(r()*15), mul=5+Math.floor(r()*6);
+    const amt=base*mul; player.gold+=amt;
+    digMsg(`🪙 골드무덤! ${G(amt)} 획득 (×${mul})`,'gold');
+    log(`🪙 골드무덤 · ${G(amt)}`); showLootEffect('🪙',`골드무덤 · ${G(amt)} 획득`);
+  }else{
+    const eff=MAZE[Math.floor(r()*MAZE.length)]();
+    digMsg(eff.t,eff.k); log(`🌀 미궁 · ${eff.e}`); showLootEffect(eff.ic,`미궁 · ${eff.e}`);
+  }
+  render(); drawMinimap(); updateUI(); markInvDirty(); checkDown(); syncMe(true);
+}
+/* 카드 양도 원장 — 넘기는 사람이 서명한 기록만 유효 */
+function logTransfer(toUid,card,reason){
+  if(!isMulti()) return;
+  roomRef().collection('xfer').add({
+    from:myUid,to:toUid,card:card?JSON.parse(JSON.stringify(card)):null,
+    reason:reason||'duel',t:SVT()
+  }).catch(e=>console.error('xfer',e));
+}
 
 initFirebase();
 setInterval(()=>{ if(started&&!gameOver) updateUI(); },1000);
