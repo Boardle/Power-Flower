@@ -594,7 +594,12 @@
       style="width:100%;background:#111722;border:1px solid var(--line);border-radius:8px;
              color:var(--cream);padding:12px;font-size:15px;font-weight:700;text-align:center;
              font-family:'Noto Sans KR',sans-serif;margin-bottom:12px">
-    <button class="btn-gold" id="startBtn" style="width:100%;padding:13px;font-size:14px">접속</button>
+    <button class="btn-gold" id="startBtn" style="width:100%;padding:13px;font-size:14px">이름으로 접속</button>
+    <button id="googleBtn" style="width:100%;padding:12px;font-size:13px;margin-top:8px;
+            display:flex;align-items:center;justify-content:center;gap:8px">
+      <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.6 2.4 30.1 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.9 6.1C12.3 13.1 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.5-4.7 7.2l7.3 5.7C43.8 37.9 46.5 31.8 46.5 24.5z"/><path fill="#FBBC05" d="M10.4 19.3A14.5 14.5 0 009.5 24c0 1.6.3 3.2.9 4.6l-7.9 6.1A24 24 0 010 24c0-3.9.9-7.5 2.5-10.8l7.9 6.1z"/><path fill="#34A853" d="M24 48c6.1 0 11.3-2 15-5.5l-7.3-5.7c-2 1.4-4.7 2.2-7.7 2.2-6.4 0-11.7-3.6-13.6-8.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+      Google로 계속하기
+    </button>
     <div class="note" id="authMsg" style="margin-top:10px">&nbsp;</div>
   </div>
 </div>
@@ -619,7 +624,9 @@
       <button class="btn-cyan" id="openShopDiaBtn">상점 💎<span id="diaTxt">0</span></button>
       <button id="openBagBtn">가방</button>
       <button id="changeNameBtn">닉네임 변경</button>
+      <button id="linkGoogleBtn" style="display:none">Google 계정 연결</button>
     </div>
+    <div class="note" id="authState" style="margin-top:4px">&nbsp;</div>
     <div class="sec-title">내 기록</div>
     <div class="note" id="myStats">불러오는 중…</div>
   </div>
@@ -1987,12 +1994,25 @@ const roomRef=()=>db.collection('rooms').doc(roomId);
 const meRef=()=>roomRef().collection('players').doc(myUid);
 
 /* ---------- 로그인 ---------- */
+async function afterLogin(uid,name){
+  myUid=uid;
+  conn('접속됨','#7fd4e8');
+  const localName=savedName();
+  const useName=(name||localName||'탐험가').slice(0,8);
+  player.name=useName; rememberName(useName);
+  await db.collection('users').doc(myUid).set({
+    name:useName, lastSeen:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true});
+  await loadAccount();
+  $('authOverlay').classList.remove('show');
+  openLobby();
+}
 $('startBtn').onclick=async()=>{
   audioCtx(); bgmStart(); sfx('click');
   const v=$('nameInput').value.trim();
   player.name=(v||'탐험가').slice(0,8);
   rememberName(player.name);
-  $('startBtn').disabled=true;
+  $('startBtn').disabled=true; $('googleBtn').disabled=true;
   $('authMsg').textContent='접속 중…';
   if(!fbReady&&!initFirebase()){
     $('authMsg').innerHTML='<span style="color:#f0a89c">서버 연결에 실패했습니다. 혼자 하기로 진행합니다.</span>';
@@ -2001,21 +2021,47 @@ $('startBtn').onclick=async()=>{
   }
   try{
     const cred=await auth.signInAnonymously();
-    myUid=cred.user.uid;
-    conn('접속됨','#7fd4e8');
-    await db.collection('users').doc(myUid).set({
-      name:player.name, lastSeen:firebase.firestore.FieldValue.serverTimestamp()
-    },{merge:true});
-    await loadAccount();
-    $('authOverlay').classList.remove('show');
-    openLobby();
+    await afterLogin(cred.user.uid,player.name);
   }catch(e){
     console.error(e);
     $('authMsg').innerHTML='<span style="color:#f0a89c">로그인 실패: '+(e.code||e.message)+
       '<br>익명 로그인이 켜져 있는지 확인하세요. 혼자 하기는 가능합니다.</span>';
-    $('startBtn').disabled=false;
+    $('startBtn').disabled=false; $('googleBtn').disabled=false;
     $('startBtn').textContent='혼자 하기';
     $('startBtn').onclick=()=>startSolo();
+  }
+};
+$('googleBtn').onclick=async()=>{
+  audioCtx(); bgmStart(); sfx('click');
+  $('startBtn').disabled=true; $('googleBtn').disabled=true;
+  $('authMsg').textContent='Google 로그인 창을 여는 중…';
+  if(!fbReady&&!initFirebase()){
+    $('authMsg').innerHTML='<span style="color:#f0a89c">서버 연결에 실패했습니다.</span>';
+    $('startBtn').disabled=false; $('googleBtn').disabled=false;
+    return;
+  }
+  try{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    let cred;
+    /* 이미 익명 세션이 있으면 계정을 연결해서 기존 기록·다이아를 그대로 이어간다 */
+    if(auth.currentUser&&auth.currentUser.isAnonymous){
+      try{ cred=await auth.currentUser.linkWithPopup(provider); }
+      catch(e2){
+        if(e2.code==='auth/credential-already-in-use'){ cred=await auth.signInWithPopup(provider); }
+        else throw e2;
+      }
+    }else{
+      cred=await auth.signInWithPopup(provider);
+    }
+    const gname=(cred.user.displayName||'').trim().slice(0,8);
+    await afterLogin(cred.user.uid,gname||savedName());
+  }catch(e){
+    console.error(e);
+    let msg='Google 로그인 실패: '+(e.code||e.message);
+    if(e.code==='auth/popup-blocked') msg='팝업이 차단되었습니다. 팝업 차단을 해제해 주세요.';
+    if(e.code==='auth/unauthorized-domain') msg='이 주소는 Firebase에 승인되지 않았습니다. 콘솔의 승인된 도메인을 확인하세요.';
+    $('authMsg').innerHTML='<span style="color:#f0a89c">'+msg+'</span>';
+    $('startBtn').disabled=false; $('googleBtn').disabled=false;
   }
 };
 $('nameInput').addEventListener('keydown',e=>{
@@ -2027,8 +2073,29 @@ function openLobby(){
   $('lobbyOverlay').classList.add('show');
   renderDia();
   $('lobbyWho').textContent=`${player.name}님, 방에 참가하거나 새 방을 만드세요`;
+  const u=auth.currentUser;
+  const isAnon=u&&u.isAnonymous;
+  $('authState').innerHTML=isAnon
+    ? `게스트로 접속 중입니다. <span style="color:var(--gold-bright)">Google 로그인</span>을 하면 기기를 바꿔도 기록이 이어집니다.`
+    : `<span style="color:#7fd4e8">Google 계정</span>으로 접속 중입니다.`;
+  $('linkGoogleBtn').style.display=isAnon?'block':'none';
   watchRooms(); loadAccount();
 }
+$('linkGoogleBtn').onclick=async()=>{
+  try{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    const cred=await auth.currentUser.linkWithPopup(provider);
+    const gname=(cred.user.displayName||'').trim().slice(0,8);
+    if(gname){ player.name=gname; rememberName(gname);
+      await db.collection('users').doc(myUid).set({name:gname},{merge:true}); }
+    toast('Google 계정을 연결했습니다');
+    openLobby();
+  }catch(e){
+    console.error(e);
+    toast('연결 실패: '+(e.code==='auth/credential-already-in-use'
+      ?'이미 다른 계정에 연결된 Google 계정입니다':(e.code||e.message)));
+  }
+};
 function watchRooms(){
   const un=db.collection('rooms').orderBy('createdAt','desc').limit(30)
     .onSnapshot(snap=>{
