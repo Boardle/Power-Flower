@@ -280,7 +280,11 @@
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.2 4.6L19 5l-1.8 4.4L22 11l-4 2.2 1.6 4.4-4.4-1.4L12 22l-2.2-5.8L5.4 17.6 7 13.2 3 11l4.8-1.6L6 5l4.8 1.6z' fill='%23e8763a'/%3E%3C/svg%3E");}
   body[data-theme="maple"] .cell.dug{background:#3a2a17;}
   body[data-theme="maple"] .cell.block{
-    background:linear-gradient(160deg,#5a3a1e,#2a1a0c);border-color:rgba(200,120,60,.45);}
+    background:linear-gradient(160deg,#232830,#12151a);border-color:#4a5560;}
+  body[data-theme="maple"] .cell.block::after{
+    content:"";position:absolute;inset:0;opacity:.5;
+    background:repeating-linear-gradient(0deg,rgba(120,140,160,.14) 0 5px,transparent 5px 11px),
+               repeating-linear-gradient(90deg,rgba(0,0,0,.25) 0 1px,transparent 1px 13px);}
 
   .rt-prize{background:linear-gradient(90deg,rgba(201,162,75,.2),rgba(0,0,0,.2));
             border:1px solid var(--gold);border-radius:10px;padding:10px 14px;font-size:12px;margin-bottom:10px;}
@@ -690,7 +694,7 @@
     </div>
     <div class="sec-title">계정</div>
     <div class="lobby-btns">
-      <button class="btn-cyan" id="openShopDiaBtn">상점 💎<span id="diaTxt">0</span></button>
+      <button class="btn-cyan" id="openShopDiaBtn">상점</button>
       <button id="openBagBtn">가방</button>
       <button id="changeNameBtn">닉네임 변경</button>
       <button id="linkGoogleBtn" style="display:none">Google 계정 연결</button>
@@ -915,7 +919,8 @@ const THEMES={
     desc:'10월 단풍으로 뒤덮인 미로. 벽이 길을 가로막습니다.',
     shops:4, grave:20, gold:20, maze:16, tele:14, merchant:0}
 };
-let mapTheme='gongsan', mapStage=0;
+let mapTheme='gongsan', mapStage=0, mapGen=0;
+let digProgAtomicGuard=false;   /* 맵 전환 명령이 중복 발송되지 않도록 */
 const theme=()=>THEMES[mapTheme]||THEMES.gongsan;
 function stageSize(){
   const sz=theme().sizes;
@@ -985,11 +990,33 @@ function genMaze(){
     tiles[idx(nx,ny)]=0;
     stack.push([nx,ny]);
   }
-  /* 막다른 길을 일부 터서 순환로를 만든다 (길 잃되 갇히지 않게) */
-  const opens=Math.floor(MAP*MAP*0.03);
-  for(let k=0;k<opens;k++){
+  /* 막다른 길을 넉넉히 터서 순환로를 만든다. 반드시 기존 통로에 붙은 벽만 뚫어
+     고립된 섬이 생기지 않게 한다 */
+  const openTarget=Math.floor(MAP*MAP*0.11);
+  let openDone=0, openGuard=0;
+  while(openDone<openTarget&&openGuard++<openTarget*6){
     const x=1+Math.floor(rnd()*(MAP-2)), y=1+Math.floor(rnd()*(MAP-2));
-    if(tiles[idx(x,y)]===T_BLOCK) tiles[idx(x,y)]=0;
+    const i=idx(x,y);
+    if(tiles[i]!==T_BLOCK) continue;
+    let openNb=0;
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+      const j=idx(x+dx,y+dy);
+      if(x+dx>=0&&y+dy>=0&&x+dx<MAP&&y+dy<MAP&&tiles[j]!==T_BLOCK) openNb++;
+    });
+    if(openNb>=1){ tiles[i]=0; openDone++; }
+  }
+  /* 일부 통로 옆을 넓혀 작은 광장을 만든다 (시야 확보로 방향감각 유지) */
+  const widen=Math.floor(MAP*MAP*0.05);
+  for(let k=0;k<widen;k++){
+    const x=1+Math.floor(rnd()*(MAP-2)), y=1+Math.floor(rnd()*(MAP-2));
+    const i=idx(x,y);
+    if(tiles[i]!==T_BLOCK) continue;
+    let openNb=0;
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+      const j=idx(x+dx,y+dy);
+      if(x+dx>=0&&y+dy>=0&&x+dx<MAP&&y+dy<MAP&&tiles[j]!==T_BLOCK) openNb++;
+    });
+    if(openNb>=2) tiles[i]=0;
   }
 }
 function genMarket(){
@@ -1087,6 +1114,7 @@ function buildTiles(seed){
   document.body.dataset.theme=mapTheme;
   $('mapName').textContent=`${theme().name}${theme().sizes.length>1?' · '+(mapStage+1)+'번째 장터':''}`;
   $('mapSize').textContent=`${MAP}×${MAP}`;
+  digProgAtomicGuard=false;
 }
 function markDug(i){ if(!dug[i]){ dug[i]=1; dugCount++; pushDig(i); } }
 function regenMap(){
@@ -1098,8 +1126,41 @@ function regenMap(){
   render(); drawMinimap(); updateUI();
 }
 function checkMapExhausted(){
-  if(MODE!=='solo') return;   /* 멀티는 맵 전환을 하지 않음 */
+  if(MODE!=='solo'){
+    /* 멀티: 방장만 판정해서 방 문서를 갱신 → 모든 클라이언트가 이를 보고 따라간다 */
+    if(!isKeeper||digProgAtomicGuard) return;
+    if(dugCount>=DIGGABLE*0.85){
+      digProgAtomicGuard=true;
+      mpAdvanceMap().finally(()=>{ digProgAtomicGuard=false; });
+    }
+    return;
+  }
   if(dugCount>=DIGGABLE*0.85) regenMap();
+}
+/* 멀티: 다음 맵으로 전환 (방 문서를 갱신하면 모든 클라이언트가 따라온다) */
+async function mpAdvanceMap(){
+  const multiStage=theme().sizes.length>1;
+  const nextStage=multiStage?Math.min(mapStage+1,theme().sizes.length-1):0;
+  const sameStage=multiStage&&nextStage===mapStage;
+  const newSeed=(!multiStage||sameStage)?Math.floor(Math.random()*2147483647):mapSeed;
+  try{
+    await roomRef().set({
+      mapStage:nextStage, seed:newSeed,
+      mapGen:firebase.firestore.FieldValue.increment(1)
+    },{merge:true});
+  }catch(e){ console.error('advanceMap',e); }
+}
+/* 방 문서의 맵 정보가 바뀌면 전 클라이언트가 함께 맵을 새로 만든다 */
+function mpApplyMap(r,announceIt){
+  mapTheme=r.theme||mapTheme;
+  mapStage=r.mapStage||0;
+  mapGen=r.mapGen||0;
+  mapSeed=r.seed;
+  buildTiles(mapSeed);
+  const p=freeSpot(); player.x=p.x; player.y=p.y;
+  watchDigs();
+  if(announceIt) announce(`땅이 모두 파헤쳐졌습니다! ${theme().name} ${MAP}×${MAP} 구역으로 이동합니다`);
+  render(); drawMinimap(); updateUI();
 }
 function init(seed){
   buildTiles(seed);
@@ -1376,6 +1437,19 @@ function dig(auto){
     if(extra) digMsg(`인접 ${extra}칸 추가 채굴`,'item');
   }
   render(); drawMinimap(); updateUI(); checkDown(); checkMapExhausted();
+}
+
+/* ================= 안전지대 / 약탈 ================= */
+const inShop=p=>!!(shopAt[idx(p.x,p.y)]||merchantAt[idx(p.x,p.y)]);
+/* 상대 카드를 높은 월 내림차순 상위 10장 중 랜덤으로 1장 약탈 */
+function stealCard(from,to){
+  if(!from.cards.length) return null;
+  const top=[...from.cards].sort((a,b)=>b.month-a.month).slice(0,10);
+  const c=top[Math.floor(Math.random()*top.length)];
+  const i=from.cards.findIndex(x=>x.id===c.id);
+  if(i>=0) from.cards.splice(i,1);
+  giveCard(to,c);
+  return c;
 }
 
 /* ================= 라이벌 AI ================= */
@@ -2439,10 +2513,10 @@ async function doCreateRoom(){
     const seed=Math.floor(Math.random()*2147483647);
     const doc=await db.collection('rooms').add({
       name:`${player.name}의 방 · ${theme().name}`, hostUid:myUid, hostName:player.name,
-      seed, theme:mapTheme, status:'waiting', count:1,
+      seed, theme:mapTheme, mapStage:0, mapGen:0, status:'waiting', count:1,
       createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
-    roomId=doc.id; isHost=true; mapSeed=seed;
+    roomId=doc.id; isHost=true; mapSeed=seed; mapStage=0; mapGen=0;
     await enterRoomDoc();
     openRoomView();
   }catch(e){ console.error(e); toast('방 생성 실패: '+(e.code||e.message)); }
@@ -2455,7 +2529,8 @@ async function joinRoom(id){
     const r=d.data();
     if((r.count||1)>=ROOM_MAX&&r.hostUid!==myUid){ toast(`정원이 가득 찼습니다 (최대 ${ROOM_MAX}명)`); roomId=null; return; }
     isHost=(r.hostUid===myUid); mapSeed=r.seed;
-    if(r.theme&&THEMES[r.theme]){ mapTheme=r.theme; mapStage=0; }
+    if(r.theme&&THEMES[r.theme]){ mapTheme=r.theme; }
+    mapStage=r.mapStage||0; mapGen=r.mapGen||0;
     await enterRoomDoc();
     if(r.status==='playing'){ gameStartAt=r.startedAt||nowMs(); beginGame(r.seed); }
     else openRoomView();
@@ -2482,6 +2557,8 @@ function openRoomView(){
     const r=d.data();
     $('roomTitle').textContent=r.name||'대기실';
     if(r.theme&&THEMES[r.theme]){ mapTheme=r.theme; }
+    if(typeof r.mapStage==='number') mapStage=r.mapStage;
+    if(typeof r.mapGen==='number') mapGen=r.mapGen;
     if(r.startedAt) gameStartAt=r.startedAt;
     if(r.status==='playing'&&!started){ beginGame(r.seed); }
   });
@@ -2653,23 +2730,27 @@ function beginGame(seed){
 
 /* ---------- 채굴 동기화 ---------- */
 const CHUNK=400;
+let unsubDigs=null;
 function watchDigs(){
-  const un=roomRef().collection('digs').onSnapshot(snap=>{
+  if(unsubDigs){ unsubDigs(); unsubDigs=null; }
+  const gen=mapGen;
+  unsubDigs=roomRef().collection('digs_'+gen).onSnapshot(snap=>{
+    if(gen!==mapGen) return;   /* 이미 다음 맵으로 넘어간 뒤 도착한 응답은 무시 */
     snap.docChanges().forEach(ch=>{
       const data=ch.doc.data()||{};
       Object.keys(data).forEach(k=>{
         const i=parseInt(k,10);
-        if(!isNaN(i)&&!dug[i]){ dug[i]=1; dugCount++; }
+        if(!isNaN(i)&&i<MAP*MAP&&!dug[i]){ dug[i]=1; dugCount++; }
       });
     });
     if(started){ render(); drawMinimap(); }
   },err=>console.error(err));
-  unsubs.push(un);
+  unsubs.push(unsubDigs);
 }
 function pushDig(i){
   if(!isMulti()) return;
   const c='c'+Math.floor(i/CHUNK);
-  roomRef().collection('digs').doc(c)
+  roomRef().collection('digs_'+mapGen).doc(c)
     .set({[String(i)]:1},{merge:true}).catch(e=>console.error(e));
 }
 
@@ -2959,6 +3040,9 @@ function watchRT(){
     if(!d.exists) return;
     const r=d.data();
     if(r.rtNext) rtNextAt=r.rtNext;
+    if(started&&typeof r.mapGen==='number'&&r.mapGen!==mapGen){
+      mpApplyMap(r,true);
+    }
   }));
 }
 /* 남은 시간 표시 + 관리자의 원탁 개시 */
@@ -3350,18 +3434,76 @@ async function restoreInv(){
     return true;
   }catch(e){ console.error('restore',e); return false; }
 }
-/* 타일 선점: 이미 있으면 규칙이 거부 → 먼저 판 사람이 임자 */
+/* 타일 선점: 이미 있으면 규칙이 거부 → 먼저 판 사람이 임자 (맵 세대별 네임스페이스) */
 async function claimTile(i){
   try{
-    await roomRef().collection('tiles').doc(String(i)).set({uid:myUid,t:SVT()});
+    await roomRef().collection('tiles_'+mapGen).doc(String(i)).set({uid:myUid,t:SVT()});
     return true;
   }catch(e){ return false; }
 }
+/* 여러 번 파야 하는 칸의 누적 진행도를 트랜잭션으로 공유 (모란 장터 기본 타일 · 무덤 · 미궁 공용) */
+async function claimProgress(i,need){
+  let done=false, n=0, gen=mapGen;
+  try{
+    await db.runTransaction(async tx=>{
+      const ref=roomRef().collection('digprog_'+gen).doc(String(i));
+      const d=await tx.get(ref);
+      if(d.exists&&d.data().done){ done=true; n=need; return; }
+      const cur=d.exists?(d.data().n||0):0;
+      n=cur+1;
+      if(n>=need){ done=true; tx.set(ref,{n,done:true,by:myUid}); }
+      else tx.set(ref,{n},{merge:true});
+    });
+  }catch(e){ console.error('progress',e); }
+  return {done,n};
+}
 async function mpDig(i,auto){
   const sp=SPECIAL[tiles[i]];
-  if(sp){ return mpDigGrave(i,sp); }
+  const need=sp?sp.need:tileNeed(i);
+  const gen=mapGen;
+
+  if(need>1){
+    player.gold-=1; updateUI();
+    const {done,n}=await claimProgress(i,need);
+    if(gen!==mapGen) return;   /* 그사이 맵이 바뀌었으면 결과를 버린다 */
+    digCnt[i]=n;
+    if(!done){
+      digMsg(`${sp?sp.n:'단단한 땅'} 채굴 ${n}/${need}`,'none');
+      render(); updateUI(); return;
+    }
+    delete digCnt[i]; markDug(i);
+    const r=tileRngAt(i);
+    if(sp&&tiles[i]===4){
+      const cnt=5+Math.floor(r()*6), got=[];
+      for(let k=0;k<cnt;k++) got.push(giveCard(player,rollCardR(r,'g'+i+'-'+k)));
+      digMsg(`카드무덤! 카드 ${cnt}장 획득`,'card'); sfx('grave');
+      log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
+    }else if(sp&&tiles[i]===5){
+      const base=3+countItem('세공증')+Math.floor(r()*15), mul=5+Math.floor(r()*6);
+      const amt=base*mul; player.gold+=amt;
+      digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
+      log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
+    }else if(sp&&tiles[i]===9){
+      const p=freeSpot(); player.x=p.x; player.y=p.y;
+      digMsg('텔레포트! 이동합니다','item'); sfx('maze');
+      showLootEffect(ICON.tele,`텔레포트 · ${p.x}, ${p.y}`);
+    }else if(sp){
+      const eff=MAZE[Math.floor(r()*MAZE.length)]();
+      digMsg(eff.t,eff.k); log(`미궁 · ${eff.e}`);
+      showLootEffect(ICON.maze,`미궁 · ${eff.e}`); sfx('maze');
+    }else{
+      const res=resolveTile(i);
+      digMsg(res.t,res.k); log(`채굴 · ${res.t}`);
+      sfx(res.k==='card'?'card':res.k==='gold'?'gold':res.k==='item'?'item':'none');
+      tryDiamond();
+    }
+    render(); drawMinimap(); updateUI(); markInvDirty(); checkDown(); syncMe(true); checkMapExhausted();
+    return;
+  }
+
   player.gold-=1; updateUI();
   const ok=await claimTile(i);
+  if(gen!==mapGen) return;
   if(!ok){
     if(!dug[i]){ dug[i]=1; dugCount++; }
     digMsg('한발 늦었습니다 · 이미 파간 자리','warn');
@@ -3377,51 +3519,14 @@ async function mpDig(i,auto){
       const nx=player.x+dx, ny=player.y+dy;
       if(nx<0||ny<0||nx>=MAP||ny>=MAP) continue;
       const j=idx(nx,ny);
-      if(shopAt[j]||dug[j]||tiles[j]>=4) continue;
+      if(shopAt[j]||merchantAt[j]||dug[j]||tiles[j]>=4||tiles[j]===T_BLOCK) continue;
       if(await claimTile(j)){ const r2=resolveTile(j); extra++; log(`　↳ 추가 채굴 · ${r2.t}`); }
     }
-    if(extra) digMsg(`⚡ 인접 ${extra}칸 추가 채굴`,'item');
+    if(extra) digMsg(`인접 ${extra}칸 추가 채굴`,'item');
   }
-  render(); drawMinimap(); updateUI(); markInvDirty(); syncMe(true);
+  render(); drawMinimap(); updateUI(); markInvDirty(); syncMe(true); checkMapExhausted();
 }
-/* 무덤·미궁은 여러 명이 함께 파므로 누적 횟수를 트랜잭션으로 공유 */
-async function mpDigGrave(i,sp){
-  player.gold-=1; updateUI();
-  let done=false, n=0;
-  try{
-    await db.runTransaction(async tx=>{
-      const ref=roomRef().collection('graves').doc(String(i));
-      const d=await tx.get(ref);
-      const cur=d.exists?(d.data().n||0):0;
-      if(d.exists&&d.data().done){ done=false; n=sp.need; return; }
-      n=cur+1;
-      if(n>=sp.need){ done=true; tx.set(ref,{n,done:true,by:myUid}); }
-      else tx.set(ref,{n},{merge:true});
-    });
-  }catch(e){ console.error('grave',e); }
-  digCnt[i]=n;
-  if(!done){
-    digMsg(`${sp.n} 채굴 ${n}/${sp.need}`,'none');
-    render(); updateUI(); return;
-  }
-  markDug(i); delete digCnt[i];
-  const r=tileRngAt(i);
-  if(tiles[i]===4){
-    const cnt=5+Math.floor(r()*6), got=[];
-    for(let k=0;k<cnt;k++) got.push(giveCard(player,rollCardR(r,'g'+i+'-'+k)));
-    digMsg(`카드무덤! 카드 ${cnt}장 획득`,'card'); sfx('grave');
-    log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
-  }else if(tiles[i]===5){
-    const base=3+countItem('세공증')+Math.floor(r()*15), mul=5+Math.floor(r()*6);
-    const amt=base*mul; player.gold+=amt;
-    digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
-    log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
-  }else{
-    const eff=MAZE[Math.floor(r()*MAZE.length)]();
-    digMsg(eff.t,eff.k); log(`미궁 · ${eff.e}`); showLootEffect(ICON.maze,`미궁 · ${eff.e}`); sfx('maze');
-  }
-  render(); drawMinimap(); updateUI(); markInvDirty(); checkDown(); syncMe(true);
-}
+
 /* 카드 양도 원장 — 넘기는 사람이 서명한 기록만 유효 */
 function logTransfer(toUid,card,reason){
   if(!isMulti()) return;
