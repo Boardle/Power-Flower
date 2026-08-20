@@ -2702,13 +2702,14 @@ function startSolo(){
   $('connBar').style.display='none';
   $('exitBtn').style.display='none';
   $('scoreWrap').style.display='none';
-  started=true; gameStartAt=nowMs(); upg={power:0,range:0}; init(); consumeBag();
+  resetPlayerState();
+  started=true; gameStartAt=nowMs(); init(); consumeBag();
 }
 function beginGame(seed){
   MODE='multi';
   ['authOverlay','lobbyOverlay','roomOverlay'].forEach(id=>$(id).classList.remove('show'));
+  resetPlayerState();
   started=true;
-  upg={power:0,range:0};
   init(seed);
   $('scoreWrap').style.display='block';
   $('exitBtn').style.display='block';
@@ -2734,9 +2735,10 @@ let unsubDigs=null;
 function watchDigs(){
   if(unsubDigs){ unsubDigs(); unsubDigs=null; }
   const gen=mapGen;
-  unsubDigs=roomRef().collection('digs_'+gen).onSnapshot(snap=>{
+  unsubDigs=roomRef().collection('digs').onSnapshot(snap=>{
     if(gen!==mapGen) return;   /* 이미 다음 맵으로 넘어간 뒤 도착한 응답은 무시 */
     snap.docChanges().forEach(ch=>{
+      if(ch.doc.id.indexOf(gen+'c')!==0) return;   /* 다른 세대의 기록은 건너뛴다 */
       const data=ch.doc.data()||{};
       Object.keys(data).forEach(k=>{
         const i=parseInt(k,10);
@@ -2749,8 +2751,7 @@ function watchDigs(){
 }
 function pushDig(i){
   if(!isMulti()) return;
-  const c='c'+Math.floor(i/CHUNK);
-  roomRef().collection('digs_'+mapGen).doc(c)
+  roomRef().collection('digs').doc(mapGen+'c'+Math.floor(i/CHUNK))
     .set({[String(i)]:1},{merge:true}).catch(e=>console.error(e));
 }
 
@@ -3437,7 +3438,7 @@ async function restoreInv(){
 /* 타일 선점: 이미 있으면 규칙이 거부 → 먼저 판 사람이 임자 (맵 세대별 네임스페이스) */
 async function claimTile(i){
   try{
-    await roomRef().collection('tiles_'+mapGen).doc(String(i)).set({uid:myUid,t:SVT()});
+    await roomRef().collection('tiles').doc(mapGen+'_'+i).set({uid:myUid,t:SVT()});
     return true;
   }catch(e){ return false; }
 }
@@ -3446,7 +3447,7 @@ async function claimProgress(i,need){
   let done=false, n=0, gen=mapGen;
   try{
     await db.runTransaction(async tx=>{
-      const ref=roomRef().collection('digprog_'+gen).doc(String(i));
+      const ref=roomRef().collection('graves').doc(gen+'_'+i);
       const d=await tx.get(ref);
       if(d.exists&&d.data().done){ done=true; n=need; return; }
       const cur=d.exists?(d.data().n||0):0;
@@ -3527,6 +3528,26 @@ async function mpDig(i,auto){
   render(); drawMinimap(); updateUI(); markInvDirty(); syncMe(true); checkMapExhausted();
 }
 
+/* 새 게임을 시작할 때 이전 판의 흔적을 모두 지운다 */
+function resetPlayerState(){
+  player.hp=player.maxHp;
+  player.gold=30;
+  player.cards=[];
+  player.items=[];
+  player.invulUntil=0;
+  player.invisibleUntil=0;
+  player.digBoostUntil=0;
+  player.autoDigUntil=0;
+  player.autoMoveUntil=0;
+  upg={power:0,range:0};
+  digCnt={}; dugCount=0;
+  rtApplied={}; duelApplied={}; duel=null; battleFoe=null;
+  lastSent=''; invDirty=false;
+  gameOver=false;
+  $('lootBar').innerHTML='';
+  $('logBox').innerHTML='';
+  updateUI();
+}
 /* 카드 양도 원장 — 넘기는 사람이 서명한 기록만 유효 */
 function logTransfer(toUid,card,reason){
   if(!isMulti()) return;
