@@ -97,6 +97,16 @@
              background:rgba(0,0,0,.24);border:1px solid var(--line);border-radius:10px;
              padding:10px 12px;margin-bottom:7px;}
 
+  /* 튜토리얼 안내창이 위에 있을 때, 모달이 그 아래로 내려오게 한다 */
+  body.tut-top .overlay{align-items:flex-end;padding-bottom:12px;}
+  body.tut-top .overlay .modal{max-height:calc(100vh - 260px);}
+  #tutBox{max-height:230px;}
+  .pick.hint{outline:2px solid #ffd76a;outline-offset:1px;
+             animation:hintPulse 1.1s ease-in-out infinite;}
+  @keyframes hintPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,215,106,.75);transform:translateY(-3px);}
+    50%{box-shadow:0 0 0 7px rgba(255,215,106,0);transform:translateY(-7px);}
+  }
   .cos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
   @media(max-width:480px){ .cos-grid{grid-template-columns:repeat(2,1fr);} }
   .cos-card{background:rgba(0,0,0,.26);border:1px solid var(--line);border-radius:12px;
@@ -268,7 +278,7 @@
   /* 공산 벌판 — 8월 억새 */
   body[data-theme="gongsan"] .cell.fog{background:linear-gradient(160deg,#2e3a2a,#1f2a1c);}
   body[data-theme="gongsan"] .cell.fog::after{
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg stroke='%23d8c98a' stroke-width='1.6' fill='none' stroke-linecap='round'%3E%3Cpath d='M12 21V9'/%3E%3Cpath d='M12 11c0-3 2-5 4-6'/%3E%3Cpath d='M12 13c0-3-2-5-4-6'/%3E%3C/g%3E%3Ccircle cx='17' cy='5' r='2.6' fill='%23f0e6c0'/%3E%3C/svg%3E");}
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg stroke='%23a8b878' stroke-width='1.5' fill='none' stroke-linecap='round'%3E%3Cpath d='M8 23V13'/%3E%3Cpath d='M12 23V8'/%3E%3Cpath d='M16 23V12'/%3E%3C/g%3E%3Cg fill='%23f2e4b4'%3E%3Cellipse cx='8' cy='10.5' rx='2.1' ry='3.6' transform='rotate(-14 8 10.5)'/%3E%3Cellipse cx='12' cy='5.4' rx='2.4' ry='4.2'/%3E%3Cellipse cx='16' cy='9.4' rx='2.1' ry='3.6' transform='rotate(14 16 9.4)'/%3E%3C/g%3E%3Cg stroke='%23cfc190' stroke-width='.7' opacity='.85'%3E%3Cpath d='M12 2.4v6'/%3E%3Cpath d='M8 7.6v5.4'/%3E%3Cpath d='M16 6.6v5.4'/%3E%3C/g%3E%3C/svg%3E");}
   body[data-theme="gongsan"] .cell.dug{background:#33291a;}
 
   /* 벚꽃 섬 — 3월 벚꽃 + 바다 */
@@ -285,7 +295,7 @@
   /* 모란 장터 — 6월 모란 */
   body[data-theme="moran"] .cell.fog{background:linear-gradient(160deg,#4a2a2e,#301c20);}
   body[data-theme="moran"] .cell.fog::after{
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='8' fill='%23e0473f'/%3E%3Ccircle cx='12' cy='12' r='5.4' fill='%23f26a5c'/%3E%3Ccircle cx='12' cy='12' r='2.8' fill='%23f5d15e'/%3E%3C/svg%3E");}
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='%232f6b3a'%3E%3Cpath d='M3.5 17.5c2.4-1.2 4.6-1 6 .6-2.2 1.3-4.4 1-6-.6z'/%3E%3Cpath d='M20.5 17.5c-2.4-1.2-4.6-1-6 .6 2.2 1.3 4.4 1 6-.6z'/%3E%3C/g%3E%3Cg fill='%23c0342c'%3E%3Cellipse cx='12' cy='5.6' rx='3.4' ry='2.8'/%3E%3Cellipse cx='6.2' cy='9.6' rx='3.2' ry='2.7' transform='rotate(-36 6.2 9.6)'/%3E%3Cellipse cx='17.8' cy='9.6' rx='3.2' ry='2.7' transform='rotate(36 17.8 9.6)'/%3E%3Cellipse cx='8.4' cy='15.4' rx='3.1' ry='2.6' transform='rotate(-64 8.4 15.4)'/%3E%3Cellipse cx='15.6' cy='15.4' rx='3.1' ry='2.6' transform='rotate(64 15.6 15.4)'/%3E%3C/g%3E%3Cg fill='%23ee6152'%3E%3Cellipse cx='12' cy='8.6' rx='2.6' ry='2.2'/%3E%3Cellipse cx='9' cy='12.6' rx='2.5' ry='2.1' transform='rotate(-40 9 12.6)'/%3E%3Cellipse cx='15' cy='12.6' rx='2.5' ry='2.1' transform='rotate(40 15 12.6)'/%3E%3C/g%3E%3Ccircle cx='12' cy='11.6' r='2.2' fill='%23f7d75f'/%3E%3Cg stroke='%23d8a72e' stroke-width='.6'%3E%3Cpath d='M12 9.6v4'/%3E%3Cpath d='M10 11.6h4'/%3E%3C/g%3E%3C/svg%3E");}
   body[data-theme="moran"] .cell.dug{background:#3a2a1e;}
   body[data-theme="moran"] .cell.block{
     background:linear-gradient(160deg,#7a4a2a,#4a2c18);border-color:rgba(240,180,120,.4);}
@@ -296,7 +306,7 @@
   /* 단풍 미로 — 10월 단풍 */
   body[data-theme="maple"] .cell.fog{background:linear-gradient(160deg,#4a3320,#2e1f13);}
   body[data-theme="maple"] .cell.fog::after{
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.2 4.6L19 5l-1.8 4.4L22 11l-4 2.2 1.6 4.4-4.4-1.4L12 22l-2.2-5.8L5.4 17.6 7 13.2 3 11l4.8-1.6L6 5l4.8 1.6z' fill='%23e8763a'/%3E%3C/svg%3E");}
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 22v-5' stroke='%238a4a1e' stroke-width='1.3' stroke-linecap='round'/%3E%3Cpath d='M12 2.2l1.5 3.1 2.4-1.1-.6 2.9 3.1-.9-1.6 2.6 3.3.5-2.4 2 2.6 1.7-3.2 1 1.1 2.6-3.1-.5.2 2.4-2.1-1.6-1.2 1.9-1.2-1.9-2.1 1.6.2-2.4-3.1.5 1.1-2.6-3.2-1L5.4 9.3l-2.4-2 3.3-.5L4.7 4.2l3.1.9-.6-2.9 2.4 1.1z' fill='%23d95f2b'/%3E%3Cg stroke='%238f3d18' stroke-width='.65' opacity='.8' fill='none' stroke-linecap='round'%3E%3Cpath d='M12 17V6'/%3E%3Cpath d='M12 12L7.4 8.4'/%3E%3Cpath d='M12 12l4.6-3.6'/%3E%3Cpath d='M12 15l-3.4-2.2'/%3E%3Cpath d='M12 15l3.4-2.2'/%3E%3C/g%3E%3C/svg%3E");}
   body[data-theme="maple"] .cell.dug{background:#3a2a17;}
   body[data-theme="maple"] .cell.block{
     background:linear-gradient(160deg,#232830,#12151a);border-color:#4a5560;}
@@ -764,7 +774,7 @@ const CARD_IMG={"10띠": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wB
 /* ================= 상수 ================= */
 /* 새로고침 후에도 어떤 빌드인지 바로 확인할 수 있도록 하는 버전 표시.
    파일을 수정할 때마다 이 값을 올려서 배포하면 화면에서 바로 구분됩니다. */
-const APP_VERSION = 'v1.2.1 · 2026-08-24';
+const APP_VERSION = 'v1.3.0 · 2026-08-25';
 
 let MAP=100;
 const VIEW_W=15, VIEW_H=11;
@@ -801,7 +811,7 @@ const SPECIAL={4:{n:'카드무덤',ic:'gvCard',cls:'gv-card',need:10},
                5:{n:'골드무덤',ic:'gvGold',cls:'gv-gold',need:10},
                6:{n:'미궁',ic:'maze',cls:'maze',need:30},
                9:{n:'텔레포트',ic:'tele',cls:'tele',need:30},
-               11:{n:'보물상자',ic:'chest',cls:'chest',need:5,hidden:true}};
+               11:{n:'보물상자',ic:'chest',cls:'chest',need:100,hidden:true}};
 const T_BLOCK=7, T_MERCHANT=8, T_BRIDGE=10;
 const N_CARDGRAVE=32, N_GOLDGRAVE=32, N_MAZE=34;
 let SHOPS=[];
@@ -1846,6 +1856,7 @@ setInterval(()=>{
 /* 원탁 행동 제한 타이머 */
 let actTimer=null, actLeft=ACT_LIMIT;
 function startAct(onTimeout){
+  if(TUT){ stopAct(); return; }        /* 튜토리얼에서는 시간 제한 없음 */
   clearInterval(actTimer); actLeft=ACT_LIMIT;
   $('rtAct').style.display='block';
   const draw=()=>{
@@ -1947,7 +1958,11 @@ function submitLead(){
   if(gb.parts.includes(player)&&rtSel.length) picks.set(player,rtSel[0]);
   gb.parts.forEach(p=>{
     if(p.isMe) return;
-    picks.set(p,[...p.cards].sort((a,b)=>b.month-a.month)[0]);
+    let pick=null;
+    if(TUT&&TUT.botLead){
+      pick=p.cards.find(c=>c.month===TUT.botLead.m&&c.type===TUT.botLead.t);
+    }
+    picks.set(p, pick||[...p.cards].sort((a,b)=>b.month-a.month)[0]);
   });
   $('rtPlayArea').style.display='none';
   centerInfo('제시 중…','모두 패를 내려놓습니다');
@@ -2014,6 +2029,7 @@ function nextTurn(){
     ? `현재 최고 <b style="color:var(--gold-bright)">${gb.cur.name}</b> (${gb.cur.by.name}) · <b>${p.name}</b> 차례`
     : `<b>${p.name}</b>(선)가 첫 족보를 제시합니다`;
   if(p.isMe){
+    if(TUT) tutSetHint();
     $('rtPlayArea').style.display='block';
     $('rtPreview').innerHTML=gb.cur?`${gb.cur.name} 보다 높은 족보를 제시하세요`:'선입니다 · 자유롭게 제시하세요';
     renderPicks('play');
@@ -2078,6 +2094,20 @@ function fold(p){
   setTimeout(nextTurn,800);
 }
 function aiTurn(p){
+  /* 튜토리얼: 정해진 순서대로 패를 낸다 */
+  if(TUT&&TUT.botScript&&TUT.botScript.length){
+    const want=TUT.botScript[0];
+    const sel=[];
+    want.forEach(w=>{
+      const c=p.cards.find(x=>x.month===w.m&&x.type===w.t&&!sel.includes(x));
+      if(c) sel.push(c);
+    });
+    if(sel.length===want.length){
+      const j=judgeSel(sel,gb.cur);
+      if(j.ok){ TUT.botScript.shift(); applyPlay(p,sel,j); return; }
+    }
+    TUT.botScript.shift();
+  }
   const ch=aiChoose(p,gb.cur);
   if(!ch){ fold(p); return; }
   applyPlay(p,ch.sel,ch.j);
@@ -2138,6 +2168,7 @@ function renderPicks(mode){
     const w=document.createElement('div'); w.className='pkw';
     const e=document.createElement('div');
     e.className='pick'; e.dataset.id=g.c.id; e.title=cardLabel(g.c);
+    if(TUT&&TUT.hint&&TUT.hint.some(h=>h.m===g.c.month&&h.t===g.c.type)) e.classList.add('hint');
     paintCard(e,g.c);
     w.appendChild(e);
     if(g.n>1){
@@ -4178,34 +4209,46 @@ const TUT_STEPS=[
    check:()=>TUT.duels>=2},
   {t:'원탁 단체배틀 (1/2) · 선 정하기',
    d:'200초마다 모든 탐험가가 <b>원탁</b>에 모입니다. 지금 바로 체험해 봅니다.<br>'
-     +'① 아래 뜬 원탁 창에서 카드를 <b>1장 골라 제시</b>하세요. 서로 비공개로 냅니다.<br>'
-     +'② 낸 카드를 모두 공개해서 <b>가장 높은 월</b>을 낸 사람이 선이 됩니다.<br>'
-     +'<span style="color:var(--dim)">동점이면 카드가 소멸되고 다시 겨룹니다.</span>',
+     +'서로 <b>보이지 않게 1장씩</b> 낸 뒤 공개해서, <b>가장 높은 월</b>을 낸 사람이 선(첫 차례)이 됩니다.<br>'
+     +'<span style="color:var(--gold-bright)">반짝이는 11월 피</span>를 골라 제시해 보세요. 허수아비는 2월 피를 냅니다.',
    top:true,
    enter:()=>{
      if(TUT.rtStarted) return;
      TUT.rtStarted=true;
-     player.cards=[cardOf(7,'yeol'),cardOf(9,'tti'),cardOf(4,'yeol'),cardOf(6,'tti')];
-     if(rivals[0]){
-       rivals[0].hp=100; rivals[0].invulUntil=0;
-       rivals[0].cards=[cardOf(3,'yeol'),cardOf(8,'tti'),cardOf(2,'yeol'),cardOf(10,'tti')];
-     }else{
-       rivals=[{name:'허수아비',x:clamp(player.x+1,0,MAP-1),y:player.y,hp:100,gold:0,
-         cards:[cardOf(3,'yeol'),cardOf(8,'tti'),cardOf(2,'yeol'),cardOf(10,'tti')],items:[],invulUntil:0}];
-     }
+     /* 대본에 필요한 패를 양쪽에 나눠준다 */
+     player.cards=[
+       cardOf(11,'pi'),
+       cardOf(2,'tti'), cardOf(5,'yeol'),
+       specialCard('ddaeng'), cardOf(9,'yeol'), cardOf(9,'tti'),
+       specialCard('gwangddaeng'), cardOf(3,'gwang'), cardOf(8,'gwang')
+     ];
+     const bot={name:'허수아비',x:clamp(player.x+1,0,MAP-1),y:player.y,hp:100,gold:0,
+       cards:[cardOf(2,'pi'), cardOf(1,'gwang'), cardOf(4,'yeol'),
+              cardOf(3,'gwang'), cardOf(7,'yeol')],
+       items:[],invulUntil:0};
+     rivals=[bot];
+     TUT.botLead={m:2,t:'pi'};           /* 허수아비는 2월 피를 낸다 */
+     TUT.botScript=[
+       [{m:1,t:'gwang'},{m:4,t:'yeol'}],   /* 독사 */
+       [{m:3,t:'gwang'},{m:7,t:'yeol'}]    /* 땡잡이 */
+     ];
+     TUT.hint=[{m:11,t:'pi'}];
      updateUI();
      setTimeout(()=>startRoundtable(),400);
    },
    check:()=>!!gb&&gb.phase!=='lead'},
   {t:'원탁 단체배틀 (2/2) · 족보 대결',
    d:'선부터 시계방향으로 <b>섯다 족보</b>를 냅니다. 앞사람보다 <b>높은 족보</b>만 낼 수 있고,<br>'
-     +'못 내면 <b>포기</b>합니다. 마지막까지 남은 1명이 상품을 가져갑니다.<br>'
-     +'<span style="color:var(--dim)">족보 순서(낮음→높음) · 끗 &lt; 세륙 &lt; 장사 &lt; 장삥 &lt; 구삥 &lt; 독사 &lt; 알리 &lt; 땡 &lt; 광땡</span><br>'
-     +'<span style="color:var(--dim)">피 카드와 11·12월 카드는 족보에 쓸 수 없습니다.</span><br>'
-     +'원탁이 끝날 때까지 진행해 보세요.',
+     +'못 내면 포기합니다. 마지막까지 남은 1명이 상품을 가져갑니다.<br>'
+     +'<b style="color:var(--gold-bright)">반짝이는 패</b>를 순서대로 내보세요.<br>'
+     +'① <b>2띠 + 5멍</b> → 7끗 &nbsp; ② 허수아비 <b>독사</b> &nbsp; '
+     +'③ <b>[땡] + 9멍 + 9띠</b> → 9땡<br>'
+     +'④ 허수아비 <b>땡잡이</b>(땡을 잡지만 이후 망통 취급) &nbsp; '
+     +'⑤ <b>[광땡] + 3광 + 8광</b> → 38광땡<br>'
+     +'<span style="color:var(--dim)">땡·광땡은 전용 카드가 함께 있어야 만들 수 있고, 피 카드는 족보에 쓸 수 없습니다.</span>',
    top:true,
+   enter:()=>{ TUT.hint=[{m:2,t:'tti'},{m:5,t:'yeol'}]; },
    check:()=>!!gb&&gb.phase==='end'},
-
   {t:'승리 조건',
    d:'<b>12월 카드 4장</b>(광·띠·멍·쌍피)을 모아 교환소에서 [꽃의 훈장]을 받으면 승리합니다.<br>'
      +'12월 카드를 모두 드렸습니다. 교환소(🏪) 구역으로 가서 <b>C</b>를 누른 뒤<br>'
@@ -4267,8 +4310,23 @@ function tutShow(){
 /* 삽질/조작이 필요한 단계는 화면 아래, 모달을 봐야 하는 단계는 화면 위로 올려 가리지 않게 한다 */
 function tutPosition(top){
   const box=$('tutBox');
+  document.body.classList.toggle('tut-top',!!top);
   if(top){ box.style.bottom='auto'; box.style.top='14px'; }
   else{ box.style.top='auto'; box.style.bottom='18px'; }
+}
+/* 튜토리얼 원탁: 지금 내야 할 패를 정해 강조한다 */
+function tutSetHint(){
+  if(!TUT||!gb) return;
+  const has=(m,t)=>player.cards.some(c=>c.month===m&&c.type===t);
+  if(!gb.cur){
+    TUT.hint=[{m:2,t:'tti'},{m:5,t:'yeol'}];
+  }else if(gb.cur.rank<=700 && has(9,'yeol') && has(9,'tti')){
+    TUT.hint=[{m:0,t:'ddaeng'},{m:9,t:'yeol'},{m:9,t:'tti'}];
+  }else if(has(3,'gwang') && has(8,'gwang')){
+    TUT.hint=[{m:0,t:'gwangddaeng'},{m:3,t:'gwang'},{m:8,t:'gwang'}];
+  }else{
+    TUT.hint=null;
+  }
 }
 function tutRefresh(){
   if(!TUT) return;
@@ -4292,6 +4350,7 @@ $('tutNext').onclick=()=>{
 $('tutQuit').onclick=()=>endTutorial(false);
 function endTutorial(done){
   $('tutBox').style.display='none';
+  document.body.classList.remove('tut-top');
   TUT=null; started=false; MODE='solo'; rivals=[];
   gameOver=false;
   ['battleOverlay','shopOverlay','winOverlay','rtOverlay'].forEach(id=>$(id).classList.remove('show'));
