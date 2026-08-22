@@ -101,6 +101,9 @@
   body.tut-top .overlay{align-items:flex-end;padding-bottom:12px;}
   body.tut-top .overlay .modal{max-height:calc(100vh - 260px);}
   #tutBox{max-height:230px;}
+  .cell.evt{box-shadow:0 0 0 2px #ff8cbe inset, 0 0 10px rgba(255,140,190,.5);
+            animation:evtPulse 1.2s ease-in-out infinite;}
+  @keyframes evtPulse{0%,100%{filter:brightness(1);}50%{filter:brightness(1.4);}}
   .pick.hint{outline:2px solid #ffd76a;outline-offset:1px;
              animation:hintPulse 1.1s ease-in-out infinite;}
   @keyframes hintPulse{
@@ -774,7 +777,7 @@ const CARD_IMG={"10띠": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wB
 /* ================= 상수 ================= */
 /* 새로고침 후에도 어떤 빌드인지 바로 확인할 수 있도록 하는 버전 표시.
    파일을 수정할 때마다 이 값을 올려서 배포하면 화면에서 바로 구분됩니다. */
-const APP_VERSION = 'v1.3.0 · 2026-08-25';
+const APP_VERSION = 'v1.4.0 · 2026-08-26';
 
 let MAP=100;
 const VIEW_W=15, VIEW_H=11;
@@ -1000,6 +1003,19 @@ function tileNeed(i){
   const r=mulberry32((mapSeed^Math.imul(i+7,40503))>>>0);
   return 3+Math.floor(r()*6);   /* 3~8회 */
 }
+/* 모란 장터는 단계가 오를수록 골드 수급이 좋아진다 */
+function goldMul(){
+  if(mapTheme!=='moran') return 1;
+  return mapStage===0 ? 1 : mapStage===1 ? 1.5 : 2;
+}
+/* 벚꽃 섬 전리품 파티 구역 */
+let eventZone=null;   /* {x,y,until} — 좌상단 기준 5×5 */
+function inEventZone(i){
+  if(!eventZone||nowMs()>eventZone.until) return false;
+  const x=i%MAP, y=Math.floor(i/MAP);
+  return x>=eventZone.x&&x<eventZone.x+5&&y>=eventZone.y&&y<eventZone.y+5;
+}
+const eventOn=()=>!!eventZone&&nowMs()<=eventZone.until;
 const walkable=i=>tiles[i]!==T_BLOCK;
 const isBlocked=(x,y)=>x<0||y<0||x>=MAP||y>=MAP||tiles[idx(x,y)]===T_BLOCK;
 
@@ -1173,7 +1189,8 @@ function buildTiles(seed){
     }
   };
   place(4,Math.max(2,Math.round(th.grave*scale)));
-  place(5,Math.max(2,Math.round(th.gold*scale)));
+  const goldGraveBoost = mapTheme==='moran' ? (mapStage===0?1:mapStage===1?2.5:4) : 1;
+  place(5,Math.max(2,Math.round(th.gold*scale*goldGraveBoost)));
   place(6,Math.max(1,Math.round(th.maze*scale)));
   if(th.tele) place(9,Math.max(2,Math.round(th.tele*scale)));
   if(th.chest) place(11,Math.max(1,Math.round(th.chest*scale)));
@@ -1183,7 +1200,7 @@ function buildTiles(seed){
   let blocked=0;
   for(let i=0;i<MAP*MAP;i++) if(tiles[i]===T_BLOCK||tiles[i]===T_BRIDGE) blocked++;
   DIGGABLE=MAP*MAP-Object.keys(shopAt).length-Object.keys(merchantAt).length-blocked;
-  _dropCache=null; _dropCacheKey='';
+  _dropCache=null; _dropCacheKey=''; eventZone=null; evtNextAt=0;
   document.body.dataset.theme=mapTheme;
   $('mapName').textContent=`${theme().name}${theme().sizes.length>1?' · '+(mapStage+1)+'번째 장터':''}`;
   $('mapSize').textContent=`${MAP}×${MAP}`;
@@ -1277,6 +1294,7 @@ function render(){
     }
     else if(!dug[i]){
       c.classList.add('fog');
+      if(inEventZone(i)) c.classList.add('evt');
       const need=tileNeed(i);
       if(need>1&&digCnt[i]) c.innerHTML=`<span class="prog">${digCnt[i]}/${need}</span>`;
     }
@@ -1329,6 +1347,10 @@ function drawMinimap(){
   mm.fillStyle='#5a4a2a';
   for(let y=0;y<MAP;y++)for(let x=0;x<MAP;x++) if(dug[idx(x,y)]&&tiles[idx(x,y)]!==T_BLOCK) mm.fillRect(x,y,1,1);
   const MK=Math.max(1,3/S), MH=MK/2;   /* 화면상 약 3px이 되도록 환산 */
+  if(eventOn()){
+    mm.fillStyle='rgba(255,140,190,.75)';
+    mm.fillRect(eventZone.x,eventZone.y,5,5);
+  }
   mm.fillStyle='#3f8fa8'; SHOPS.forEach(s=>mm.fillRect(s.x-MH,s.y-MH,MK,MK));
   mm.fillStyle='#d08a3a'; MERCHANTS.forEach(s=>mm.fillRect(s.x-MH,s.y-MH,MK,MK));
   mm.fillStyle='#a8382a'; rivals.forEach(r=>mm.fillRect(r.x-MH,r.y-MH,MK,MK));
@@ -1383,9 +1405,21 @@ function rollCardR(r,tag){
 function resolveTile(i){
   const k=tiles[i], r=tileRngAt(i);
   markDug(i);
+  /* 전리품 파티 구역: 꽝 없이 골드 5배 또는 카드 5장 */
+  if(inEventZone(i)){
+    if(r()<0.5){
+      const amt=Math.round((3+countItem('세공증')+Math.floor(r()*15))*5*goldMul());
+      player.gold+=amt;
+      return {t:`전리품 파티! ${G(amt)}`,k:'gold'};
+    }
+    const got=[];
+    for(let n=0;n<5;n++) got.push(giveCard(player,rollCardR(r,'e'+i+'-'+n)));
+    showLootCards(got);
+    return {t:`전리품 파티! 카드 ${got.length}장`,k:'card'};
+  }
   if(k===1){ const c=giveCard(player,rollCardR(r,'t'+i)); return {t:`${cardLabel(c)} 획득!`,k:'card'}; }
   if(k===2){
-    const amt=3+countItem('세공증')+Math.floor(r()*15);
+    const amt=Math.round((3+countItem('세공증')+Math.floor(r()*15))*goldMul());
     player.gold+=amt; return {t:`${G(amt)} 획득`,k:'gold'};
   }
   if(k===3){
@@ -1477,7 +1511,7 @@ function digOnce(i,quiet){
       log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
     }else if(tiles[i]===5){
       const base=3+countItem('세공증')+Math.floor(Math.random()*15);
-      const mul=5+Math.floor(Math.random()*6), amt=base*mul;
+      const mul=5+Math.floor(Math.random()*6), amt=Math.round(base*mul*goldMul());
       player.gold+=amt;
       digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
       log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
@@ -1534,12 +1568,14 @@ function dig(auto){
       if(tiles[j]===T_BLOCK||tiles[j]===T_BRIDGE||shopAt[j]||merchantAt[j]||dug[j]) continue;
       cand.push(j);
     }
-    let done=0;
+    let tried=0, done=0;
     for(let k=0;k<upg.range&&cand.length&&player.gold>0;k++){
       const j=cand.splice(Math.floor(Math.random()*cand.length),1)[0];
+      tried++;
       if(digOnce(j,true)) done++;
     }
-    if(done) digMsg(`주변 ${done}칸 추가 채굴`,'item');
+    if(tried) digMsg(done===tried?`주변 ${done}칸 추가 채굴`
+                                 :`주변 ${tried}칸 추가 채굴 (완료 ${done}칸)`,'item');
   }
   /* 미궁 버프: 상하좌우 추가 채굴 */
   if(player.digBoostUntil>Date.now()){
@@ -2445,6 +2481,58 @@ setInterval(()=>{
   move(dx,dy);
 },200);
 
+/* ==================================================================
+   벚꽃 섬 · 전리품 파티 (100~150초마다 30초간)
+   ================================================================== */
+const EVT_DUR=30000;
+let evtNextAt=0;
+function pickEventZone(){
+  for(let g=0;g<800;g++){
+    const x=Math.floor(Math.random()*(MAP-5)), y=Math.floor(Math.random()*(MAP-5));
+    let open=0;
+    for(let dy=0;dy<5;dy++)for(let dx=0;dx<5;dx++){
+      const j=idx(x+dx,y+dy);
+      if(tiles[j]!==T_BLOCK&&tiles[j]!==T_BRIDGE&&!shopAt[j]&&!merchantAt[j]&&!dug[j]) open++;
+    }
+    if(open>=14) return {x,y};
+  }
+  return null;
+}
+function startEvent(zone,until){
+  eventZone={x:zone.x,y:zone.y,until:until};
+  announce(`전리품 파티! ${zone.x},${zone.y} 부근 5×5 구역에서 30초간 골드·카드가 쏟아집니다`);
+  digMsg('전리품 파티 시작! 미니맵의 분홍 구역으로','card');
+  render(); drawMinimap();
+}
+setInterval(()=>{
+  if(!started||gameOver||TUT) return;
+  if(mapTheme!=='sakura') return;
+  const now=nowMs();
+  if(eventZone&&now>eventZone.until){
+    eventZone=null; render(); drawMinimap();
+    log('전리품 파티가 끝났습니다');
+  }
+  if(isMulti()){
+    if(!isKeeper) return;                 /* 멀티는 방장이 정해 모두에게 알린다 */
+    if(eventOn()) return;
+    if(!evtNextAt){ evtNextAt=now+(100+Math.random()*50)*1000; return; }
+    if(now<evtNextAt) return;
+    const z=pickEventZone(); if(!z){ evtNextAt=now+30000; return; }
+    const until=now+EVT_DUR;
+    evtNextAt=until+(100+Math.random()*50)*1000;
+    roomRef().set({evt:{x:z.x,y:z.y,until}},{merge:true}).catch(()=>{});
+    startEvent(z,until);
+    return;
+  }
+  if(eventOn()) return;
+  if(!evtNextAt){ evtNextAt=now+(100+Math.random()*50)*1000; return; }
+  if(now<evtNextAt) return;
+  const z=pickEventZone(); if(!z){ evtNextAt=now+30000; return; }
+  const until=now+EVT_DUR;
+  evtNextAt=until+(100+Math.random()*50)*1000;
+  startEvent(z,until);
+},1000);
+
 /* 기본 수입: 모든 플레이어 10초마다 1G */
 setInterval(()=>{
   if(!started||gameOver) return;
@@ -3197,6 +3285,9 @@ function watchRT(){
     if(!d.exists) return;
     const r=d.data();
     if(r.rtNext) rtNextAt=r.rtNext;
+    if(r.evt&&r.evt.until>nowMs()){
+      if(!eventZone||eventZone.until!==r.evt.until) startEvent(r.evt,r.evt.until);
+    }
     if(started&&typeof r.mapGen==='number'&&r.mapGen!==mapGen){
       mpApplyMap(r,true);
     }
@@ -3650,7 +3741,7 @@ async function mpDig(i,auto){
       log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
     }else if(sp&&tiles[i]===5){
       const base=3+countItem('세공증')+Math.floor(r()*15), mul=5+Math.floor(r()*6);
-      const amt=base*mul; player.gold+=amt;
+      const amt=Math.round(base*mul*goldMul()); player.gold+=amt;
       digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
       log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
     }else if(sp&&tiles[i]===9){
@@ -3720,17 +3811,24 @@ async function mpDigRange(){
     if(tiles[j]===T_BLOCK||tiles[j]===T_BRIDGE||shopAt[j]||merchantAt[j]||dug[j]) continue;
     cand.push(j);
   }
-  let done=0;
+  let tried=0, done=0;
   for(let k=0;k<upg.range&&cand.length&&player.gold>0;k++){
     const j=cand.splice(Math.floor(Math.random()*cand.length),1)[0];
     const need=SPECIAL[tiles[j]]?SPECIAL[tiles[j]].need:tileNeed(j);
-    if(need>1) continue;   /* 다회채굴 칸은 범위 강화 대상에서 제외 (부작용 방지) */
-    player.gold-=1;
+    player.gold-=1; tried++;
+    if(need>1){
+      /* 여러 번 파야 하는 칸도 진행도를 함께 올린다 */
+      const r=await claimProgress(j,need);
+      digCnt[j]=r.n;
+      if(r.done){ markDug(j); delete digCnt[j]; resolveTile(j); done++; }
+      continue;
+    }
     const ok=await claimTile(j);
     if(ok){ resolveTile(j); done++; }
     else if(!dug[j]){ dug[j]=1; dugCount++; }
   }
-  if(done) digMsg(`주변 ${done}칸 추가 채굴`,'item');
+  if(tried) digMsg(done===tried?`주변 ${done}칸 추가 채굴`
+                               :`주변 ${tried}칸 추가 채굴 (완료 ${done}칸)`,'item');
 }
 
 /* 새 게임을 시작할 때 이전 판의 흔적을 모두 지운다 */
