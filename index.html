@@ -272,8 +272,9 @@
   .cell.merch-core{background:linear-gradient(160deg,#6b4a1e,#3d2a10);border-color:#f0a35e;}
   .cell.merch{background:linear-gradient(160deg,#4a3418,#2c1f0e);border-color:rgba(240,163,94,.5);}
   .cell.tele{background:linear-gradient(160deg,#3a2456,#221539);border-color:#b58cf0;}
-  .cell .trail{position:absolute;left:50%;top:50%;width:38%;height:38%;
-    transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;z-index:1;}
+  .cell .trail{position:absolute;inset:8%;pointer-events:none;z-index:1;}
+  .cell .trail svg{width:100%;height:100%;display:block;}
+  .cell .trail i{position:absolute;inset:0;mix-blend-mode:screen;opacity:.5;}
   .cell.bridge{background:linear-gradient(180deg,#8a6a3a,#5a4424);border-color:#3a2c16;}
   .cell.bridge::after{content:"";position:absolute;inset:0;opacity:.55;
     background:repeating-linear-gradient(90deg,rgba(0,0,0,.4) 0 2px,transparent 2px 7px);}
@@ -777,7 +778,7 @@ const CARD_IMG={"10띠": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wB
 /* ================= 상수 ================= */
 /* 새로고침 후에도 어떤 빌드인지 바로 확인할 수 있도록 하는 버전 표시.
    파일을 수정할 때마다 이 값을 올려서 배포하면 화면에서 바로 구분됩니다. */
-const APP_VERSION = 'v1.4.0 · 2026-08-26';
+const APP_VERSION = 'v1.5.3 · 2026-08-28';
 
 let MAP=100;
 const VIEW_W=15, VIEW_H=11;
@@ -795,9 +796,9 @@ const TCOLOR={gwang:'linear-gradient(160deg,#f4d98a,#c9a24b)',yeol:'linear-gradi
 const DROP=[[1,61],[2,17.5],[3,7.5],[4,3.2],[5,3.0],[6,2.6],[7,2.2],[8,1.8],
             [9,.12],[10,.06],[11,.015],[12,.005]];
 const P_DDAENG=0.8, P_GWANGDDAENG=0.2;
-const PACK=[[1,'gwang',17.8],[3,'gwang',17.8],[4,'yeol',10],[6,'yeol',7],[6,'tti',7],[7,'yeol',6],
+const PACK=[[1,'gwang',17.8],[3,'gwang',17.2],[4,'yeol',10],[6,'yeol',7],[6,'tti',7],[7,'yeol',6],
   [7,'tti',6],[8,'gwang',5],[8,'yeol',5],[9,'yeol',4],[9,'tti',4],[10,'yeol',3],[10,'tti',3],
-  [11,'gwang',1],[11,'pi2',1],[11,'pi',2],[12,'gwang',.1],[12,'yeol',.1],[12,'tti',.1],[12,'pi2',.1]];
+  [11,'gwang',1],[11,'pi2',1],[11,'pi',2],[12,'gwang',.25],[12,'yeol',.25],[12,'tti',.25],[12,'pi2',.25]];
 const ITEM_SELL=500;
 const ITEMS=[{n:'세공증',w:40,d:'삽질 골드 +1G · 중첩 적용'},
              {n:'손실방어',w:20,d:'패배해도 카드 보호'},
@@ -1008,7 +1009,7 @@ function goldMul(){
   if(mapTheme!=='moran') return 1;
   return mapStage===0 ? 1 : mapStage===1 ? 1.5 : 2;
 }
-/* 벚꽃 섬 전리품 파티 구역 */
+/* 벚꽃 섬 벚꽃축제 구역 */
 let eventZone=null;   /* {x,y,until} — 좌상단 기준 5×5 */
 function inEventZone(i){
   if(!eventZone||nowMs()>eventZone.until) return false;
@@ -1303,7 +1304,7 @@ function render(){
     if(rv){
       c.classList.add('rival');
       if(rv.invulUntil>now) c.classList.add('inv');
-      c.innerHTML=icHTML('bot')+`<span class="tag">${rv.name}</span>`
+      c.innerHTML=`<span class="ic">${charSVG(robeOf(rv.name))}</span>`+`<span class="tag">${rv.name}</span>`
         +(rv.invulUntil>now?'<span class="shield">◈</span>':'');
     }
     for(const k in remotes){
@@ -1311,18 +1312,20 @@ function render(){
       if(rp.invisUntil&&rp.invisUntil>now) continue;   /* 투명화 중이면 보이지 않음 */
       if(rp.x===mx&&rp.y===my){
         c.classList.add('remote');
-        c.innerHTML=icHTML('foe')+`<span class="tag">${rp.name}</span>`;
+        c.innerHTML=foeIconHTML(k)+`<span class="tag">${rp.name}</span>`;
         break;
       }
     }
     if(myEquip.tail!=='tail_none'){
-      const tr=trail.find(p=>p.x===mx&&p.y===my);
-      if(tr&&mx!==player.x&&my!==player.y===false){}
-      if(tr&&!(mx===player.x&&my===player.y)){
-        const age=(nowMs()-tr.t)/1400;
+      const ti=trail.findIndex(p=>p.x===mx&&p.y===my);
+      if(ti>=0&&!(mx===player.x&&my===player.y)){
+        const age=(nowMs()-trail[ti].t)/900;      /* 짧게 남았다 사라진다 */
         if(age<1){
           const col=cosDef('tail',myEquip.tail).col||'#fff';
-          c.innerHTML+=`<span class="trail" style="background:${col};opacity:${(1-age)*0.55}"></span>`;
+          const op=(1-age)*0.55;
+          c.innerHTML+=`<span class="trail" style="opacity:${op}">`
+            +charSVG(robeOf(myUid||player.name))
+            +`<i style="background:${col}"></i></span>`;
         }
       }
     }
@@ -1378,7 +1381,7 @@ function move(dx,dy){
   if(b){ toast(`${b.name}이(가) 길을 막고 있습니다`); return; }
   if(myEquip.tail&&myEquip.tail!=='tail_none'){
     trail.push({x:player.x,y:player.y,t:nowMs()});
-    if(trail.length>6) trail.shift();
+    if(trail.length>2) trail.shift();
   }
   player.x=nx; player.y=ny;
   if(TUT) TUT.moves++;
@@ -1404,18 +1407,20 @@ function rollCardR(r,tag){
 /* 일반 타일 1칸 처리 (비용 계산 제외, 결과 문자열 반환) */
 function resolveTile(i){
   const k=tiles[i], r=tileRngAt(i);
-  markDug(i);
-  /* 전리품 파티 구역: 꽝 없이 골드 5배 또는 카드 5장 */
+  if(!inEventZone(i)) markDug(i);
+  /* 벚꽃축제 구역: 꽝 없이 골드 5배 또는 카드 5장, 0.5초 뒤 되살아난다 */
   if(inEventZone(i)){
+    dug[i]=1;
+    setTimeout(()=>{ if(inEventZone(i)){ dug[i]=0; render(); } },500);
     if(r()<0.5){
       const amt=Math.round((3+countItem('세공증')+Math.floor(r()*15))*5*goldMul());
       player.gold+=amt;
-      return {t:`전리품 파티! ${G(amt)}`,k:'gold'};
+      return {t:`벚꽃축제! ${G(amt)}`,k:'gold'};
     }
     const got=[];
     for(let n=0;n<5;n++) got.push(giveCard(player,rollCardR(r,'e'+i+'-'+n)));
     showLootCards(got);
-    return {t:`전리품 파티! 카드 ${got.length}장`,k:'card'};
+    return {t:`벚꽃축제! 카드 ${got.length}장`,k:'card'};
   }
   if(k===1){ const c=giveCard(player,rollCardR(r,'t'+i)); return {t:`${cardLabel(c)} 획득!`,k:'card'}; }
   if(k===2){
@@ -1541,15 +1546,16 @@ function digOnce(i,quiet){
   tryDiamond();
   return true;
 }
+let digLock=false;
 function dig(auto){
-  if(busy()||gameOver) return;
+  if(busy()||gameOver||digLock) return;
   const i=idx(player.x,player.y);
   if(tiles[i]===T_BLOCK){ if(!auto) digMsg('팔 수 없는 지형입니다','warn'); return; }
   if(tiles[i]===T_BRIDGE){ if(!auto) digMsg('다리 위에서는 팔 수 없습니다','warn'); return; }
   if(shopAt[i]||merchantAt[i]){ if(!auto) digMsg('안전 구역은 팔 수 없습니다','warn'); return; }
   if(dug[i]){ if(!auto) digMsg('이미 파본 자리입니다','warn'); return; }
   if(player.gold<1){ if(!auto) digMsg('골드가 부족합니다 · 삽질 1G','warn'); return; }
-  if(isMulti()){ mpDig(i,auto); return; }
+  if(isMulti()){ digLock=true; mpDig(i,auto).finally(()=>{ digLock=false; refreshActions(); }); return; }
 
   /* 채굴 강도: 같은 칸을 1+n번 판다 */
   const reps=1+upg.power;
@@ -1572,10 +1578,13 @@ function dig(auto){
     for(let k=0;k<upg.range&&cand.length&&player.gold>0;k++){
       const j=cand.splice(Math.floor(Math.random()*cand.length),1)[0];
       tried++;
-      if(digOnce(j,true)) done++;
+      const reps2=1+upg.rangePower;
+      for(let m=0;m<reps2;m++){
+        if(dug[j]||player.gold<1) break;
+        if(digOnce(j,true)){ done++; break; }
+      }
     }
-    if(tried) digMsg(done===tried?`주변 ${done}칸 추가 채굴`
-                                 :`주변 ${tried}칸 추가 채굴 (완료 ${done}칸)`,'item');
+
   }
   /* 미궁 버프: 상하좌우 추가 채굴 */
   if(player.digBoostUntil>Date.now()){
@@ -1587,7 +1596,6 @@ function dig(auto){
       if(tiles[j]===T_BLOCK||tiles[j]===T_BRIDGE||shopAt[j]||merchantAt[j]||dug[j]||tiles[j]>=4) return;
       if(digOnce(j,true)) extra++;
     });
-    if(extra) digMsg(`인접 ${extra}칸 추가 채굴`,'item');
   }
   render(); drawMinimap(); updateUI(); checkDown(); checkMapExhausted();
 }
@@ -2482,7 +2490,7 @@ setInterval(()=>{
 },200);
 
 /* ==================================================================
-   벚꽃 섬 · 전리품 파티 (100~150초마다 30초간)
+   벚꽃 섬 · 벚꽃축제 (100~150초마다 30초간)
    ================================================================== */
 const EVT_DUR=30000;
 let evtNextAt=0;
@@ -2500,8 +2508,14 @@ function pickEventZone(){
 }
 function startEvent(zone,until){
   eventZone={x:zone.x,y:zone.y,until:until};
-  announce(`전리품 파티! ${zone.x},${zone.y} 부근 5×5 구역에서 30초간 골드·카드가 쏟아집니다`);
-  digMsg('전리품 파티 시작! 미니맵의 분홍 구역으로','card');
+  /* 구역 안의 이미 파낸 칸도 축제 동안 다시 캘 수 있게 되살린다 */
+  for(let dy=0;dy<5;dy++)for(let dx=0;dx<5;dx++){
+    const j=idx(zone.x+dx,zone.y+dy);
+    if(tiles[j]===T_BLOCK||tiles[j]===T_BRIDGE||shopAt[j]||merchantAt[j]) continue;
+    dug[j]=0;
+  }
+  announce(`벚꽃축제! ${zone.x},${zone.y} 부근 5×5 구역에서 30초간 골드·카드가 쏟아집니다`);
+  digMsg('벚꽃축제 시작! 미니맵의 분홍 구역으로','card');
   render(); drawMinimap();
 }
 setInterval(()=>{
@@ -2510,7 +2524,7 @@ setInterval(()=>{
   const now=nowMs();
   if(eventZone&&now>eventZone.until){
     eventZone=null; render(); drawMinimap();
-    log('전리품 파티가 끝났습니다');
+    log('벚꽃축제가 끝났습니다');
   }
   if(isMulti()){
     if(!isKeeper) return;                 /* 멀티는 방장이 정해 모두에게 알린다 */
@@ -2556,8 +2570,8 @@ const firebaseConfig = {
 let fbReady=false;
 /* 접속 판정 기준 */
 const BEAT_MS=10000;      // 하트비트 주기
-const STALE_MS=40000;     // 이 시간 갱신 없으면 유령으로 간주
-const PURGE_MS=90000;     // 이 시간 넘으면 문서 삭제
+const STALE_MS=75000;     // 이 시간 갱신 없으면 유령으로 간주
+const PURGE_MS=300000;    // 이 시간 넘으면 문서 삭제
 const ROOM_DEAD_MS=120000;// 방 활동이 끊긴 것으로 보는 시간
 let isKeeper=false, purgedRooms={};
 const nowMs=()=>Date.now();
@@ -3034,10 +3048,30 @@ window.addEventListener('beforeunload',()=>{
 });
 /* 탭이 다시 보이면 즉시 하트비트 (모바일 복귀 대응) */
 document.addEventListener('visibilitychange',()=>{
-  if(!document.hidden&&isMulti()&&fbReady){
-    meRef().set({t:SVT()},{merge:true}).catch(()=>{});
-  }
+  if(document.hidden||!inRoom()||!fbReady) return;
+  /* 탭이 쉬는 동안 하트비트가 끊겨 유령 처리됐을 수 있으므로 내 정보를 통째로 되살린다 */
+  lastSent='';
+  meRef().set({
+    name:player.name,x:player.x,y:player.y,hp:player.hp,
+    gold:player.gold,cards:player.cards.length,
+    invisUntil:player.invisibleUntil||0,t:SVT()
+  },{merge:true}).then(()=>{
+    if(started) toast('접속 상태를 복구했습니다');
+  }).catch(()=>{});
 });
+/* 내 문서가 사라졌으면(유령 정리로 삭제) 즉시 되살린다 */
+setInterval(()=>{
+  if(!inRoom()||!fbReady) return;
+  meRef().get().then(d=>{
+    if(d.exists) return;
+    lastSent='';
+    meRef().set({
+      name:player.name,x:player.x,y:player.y,hp:player.hp,
+      gold:player.gold,cards:player.cards.length,t:SVT()
+    },{merge:true}).catch(()=>{});
+    log('접속이 끊겼다가 자동으로 다시 연결되었습니다');
+  }).catch(()=>{});
+},25000);
 
 /* ---------- 접속자 점수판 ---------- */
 function renderScore(){
@@ -3696,19 +3730,20 @@ async function claimTile(i){
 }
 /* 여러 번 파야 하는 칸의 누적 진행도를 트랜잭션으로 공유 (모란 장터 기본 타일 · 무덤 · 미궁 공용) */
 async function claimProgress(i,need){
-  let done=false, n=0, gen=mapGen;
+  /* state: 'progress' 진행중 | 'done' 이번 삽질로 완성 | 'already' 이미 누군가 완성함 */
+  let state='progress', n=0, gen=mapGen;
   try{
     await db.runTransaction(async tx=>{
       const ref=roomRef().collection('graves').doc(gen+'_'+i);
       const d=await tx.get(ref);
-      if(d.exists&&d.data().done){ done=true; n=need; return; }
+      if(d.exists&&d.data().done){ state='already'; n=need; return; }
       const cur=d.exists?(d.data().n||0):0;
       n=cur+1;
-      if(n>=need){ done=true; tx.set(ref,{n,done:true,by:myUid}); }
-      else tx.set(ref,{n},{merge:true});
+      if(n>=need){ state='done'; tx.set(ref,{n,done:true,by:myUid}); }
+      else{ state='progress'; tx.set(ref,{n},{merge:true}); }
     });
-  }catch(e){ console.error('progress',e); }
-  return {done,n};
+  }catch(e){ console.error('progress',e); state='fail'; }
+  return {done:state==='done', already:state==='already', fail:state==='fail', n};
 }
 async function mpDig(i,auto){
   const sp=SPECIAL[tiles[i]];
@@ -3719,6 +3754,7 @@ async function mpDig(i,auto){
     /* 채굴 강도: 서버 진행도를 (1+power)번까지 연속으로 밀어붙인다 */
     const reps=1+upg.power;
     let done=false, n=0;
+    let already=false;
     for(let k=0;k<reps;k++){
       if(player.gold<1) break;
       player.gold-=1; updateUI();
@@ -3726,7 +3762,14 @@ async function mpDig(i,auto){
       if(gen!==mapGen) return;
       done=r.done; n=r.n;
       digCnt[i]=n;
+      if(r.already){ already=true; break; }
       if(done) break;
+    }
+    if(already){
+      /* 이미 다른 삽질이 완성한 칸 — 전리품을 다시 주지 않는다 */
+      markDug(i); delete digCnt[i];
+      digMsg('이미 채굴된 땅입니다','warn');
+      render(); drawMinimap(); updateUI(); return;
     }
     if(!done){
       digMsg(`${sp?sp.n:'단단한 땅'} 채굴 ${n}/${need}`,'none');
@@ -3776,7 +3819,7 @@ async function mpDig(i,auto){
     if(gen!==mapGen) return;
     if(!ok){
       if(!dug[i]){ dug[i]=1; dugCount++; }
-      if(k===0) digMsg('한발 늦었습니다 · 이미 파간 자리','warn');
+      if(k===0) digMsg('이미 채굴된 땅입니다','warn');
       render(); drawMinimap(); updateUI(); markInvDirty();
       return;
     }
@@ -3794,7 +3837,6 @@ async function mpDig(i,auto){
       if(shopAt[j]||merchantAt[j]||dug[j]||tiles[j]>=4||tiles[j]===T_BLOCK||tiles[j]===T_BRIDGE) continue;
       if(await claimTile(j)){ const r2=resolveTile(j); extra++; log(`　↳ 추가 채굴 · ${r2.t}`); }
     }
-    if(extra) digMsg(`인접 ${extra}칸 추가 채굴`,'item');
   }
   await mpDigRange();
   render(); drawMinimap(); updateUI(); markInvDirty(); syncMe(true); checkMapExhausted();
@@ -3815,20 +3857,26 @@ async function mpDigRange(){
   for(let k=0;k<upg.range&&cand.length&&player.gold>0;k++){
     const j=cand.splice(Math.floor(Math.random()*cand.length),1)[0];
     const need=SPECIAL[tiles[j]]?SPECIAL[tiles[j]].need:tileNeed(j);
-    player.gold-=1; tried++;
+    tried++;
     if(need>1){
-      /* 여러 번 파야 하는 칸도 진행도를 함께 올린다 */
-      const r=await claimProgress(j,need);
-      digCnt[j]=r.n;
-      if(r.done){ markDug(j); delete digCnt[j]; resolveTile(j); done++; }
+      /* 여러 번 파야 하는 칸은 범위 강도만큼 진행도를 올린다 */
+      const reps2=1+upg.rangePower;
+      for(let m=0;m<reps2;m++){
+        if(player.gold<1) break;
+        player.gold-=1;
+        const r=await claimProgress(j,need);
+        digCnt[j]=r.n;
+        if(r.already){ markDug(j); delete digCnt[j]; break; }
+        if(r.done){ markDug(j); delete digCnt[j]; resolveTile(j); done++; break; }
+      }
       continue;
     }
+    player.gold-=1;
     const ok=await claimTile(j);
     if(ok){ resolveTile(j); done++; }
     else if(!dug[j]){ dug[j]=1; dugCount++; }
   }
-  if(tried) digMsg(done===tried?`주변 ${done}칸 추가 채굴`
-                               :`주변 ${tried}칸 추가 채굴 (완료 ${done}칸)`,'item');
+
 }
 
 /* 새 게임을 시작할 때 이전 판의 흔적을 모두 지운다 */
@@ -3842,7 +3890,7 @@ function resetPlayerState(){
   player.digBoostUntil=0;
   player.autoDigUntil=0;
   player.autoMoveUntil=0;
-  upg={power:0,range:0};
+  upg={power:0,range:0,rangePower:0};
   digCnt={}; dugCount=0;
   rtApplied={}; duelApplied={}; duel=null; battleFoe=null;
   lastSent=''; invDirty=false;
@@ -3880,16 +3928,14 @@ const ICON={
   diamond:SV(0,'<path d="M12 2l6 6-6 14L6 8z" fill="#7fe3f0"/><path d="M6 8h12l-6 14z" fill="#3fb0c8"/><path d="M12 2L9 8h6z" fill="#d9fbff"/>')
 };
 const icHTML=k=>`<span class="ic">${ICON[k]}</span>`;
-/* 착용한 꾸미기를 반영한 내 캐릭터 아이콘 */
+/* 내 캐릭터 (옷 색은 uid로 자동 배정, 날개는 착용한 것) */
 function meIconHTML(){
-  const sk=cosDef('skin',myEquip.skin), wg=cosDef('wing',myEquip.wing);
-  const wing = wg.col
-    ? `<path d="M5 12c-3-2-4 3-1 5 2 1.4 4 .6 4-1z" fill="${wg.col}" opacity=".9"/>`
-     +`<path d="M19 12c3-2 4 3 1 5-2 1.4-4 .6-4-1z" fill="${wg.col}" opacity=".9"/>`
-    : '';
-  return `<span class="ic"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${wing}`
-    +`<circle cx="12" cy="6.5" r="3.4" fill="${sk.head}"/>`
-    +`<path d="M5.5 21c0-4.1 2.9-7 6.5-7s6.5 2.9 6.5 7z" fill="${sk.body}"/></svg></span>`;
+  const wg=cosDef('wing',myEquip.wing);
+  return `<span class="ic">${charSVG(robeOf(myUid||player.name),{wing:WING_SVG[wg.key]||''})}</span>`;
+}
+/* 다른 플레이어 캐릭터 */
+function foeIconHTML(uid){
+  return `<span class="ic">${charSVG(robeOf(uid))}</span>`;
 }
 
 /* ==================================================================
@@ -3980,30 +4026,71 @@ function toggleSfx(){
    다이아몬드 · 상점 · 가방 (계정에 영구 저장)
    ================================================================== */
 /* 상점 — 게임 성능에 영향이 없는 꾸미기 전용 */
+/* 플레이어 옷 색상 (외형은 판매하지 않고 접속 순서·uid로 자동 배정) */
+const ROBES=[
+  {id:'blue',   n:'파랑', robe:'#3f5fa8', trim:'#2b4177'},
+  {id:'red',    n:'빨강', robe:'#b23a34', trim:'#7d2622'},
+  {id:'yellow', n:'노랑', robe:'#c9a02c', trim:'#8f6f18'},
+  {id:'green',  n:'초록', robe:'#3f8a52', trim:'#2a6038'},
+  {id:'gray',   n:'회색', robe:'#6b7280', trim:'#464c55'},
+  {id:'purple', n:'보라', robe:'#7a4fa8', trim:'#553378'}
+];
+function robeOf(key){
+  const s=String(key||'me');
+  let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
+  return ROBES[h%ROBES.length];
+}
+/* 첨부 이미지를 본뜬 도트풍 모험가 (투구·망토·둥근 방패) */
+function charSVG(robe,opt){
+  const o=opt||{};
+  const wing=o.wing||'';
+  return `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">`
+    +wing
+    +`<rect x="12" y="20" width="3" height="4" fill="#3a2a1c"/>`
+    +`<rect x="17" y="20" width="3" height="4" fill="#3a2a1c"/>`
+    +`<path d="M9 12h14v10H9z" fill="${robe.robe}"/>`
+    +`<path d="M9 12h14v10H9z" fill="none" stroke="${robe.trim}" stroke-width="1"/>`
+    +`<rect x="9" y="19" width="14" height="3" fill="${robe.trim}"/>`
+    +`<rect x="12" y="5" width="8" height="7" fill="#f0cba4"/>`
+    +`<path d="M11 5h10v4H11z" fill="#9aa3ad"/>`
+    +`<path d="M11 4h10l1 2H10z" fill="#b6bec7"/>`
+    +`<rect x="15" y="6" width="2" height="5" fill="#9aa3ad"/>`
+    +`<rect x="13" y="9" width="1.6" height="1.6" fill="#2b2b2b"/>`
+    +`<rect x="18" y="9" width="1.6" height="1.6" fill="#2b2b2b"/>`
+    +`<circle cx="21" cy="17" r="4.6" fill="#8a5a2a" stroke="#5a3a18" stroke-width="1"/>`
+    +`<circle cx="21" cy="17" r="1.5" fill="#b6bec7"/>`
+    +`</svg>`;
+}
+/* 날개 (첨부 이미지 참고 · 어떤 캐릭터에도 덧입힐 수 있게 분리) */
+const WING_SVG={
+  none:'',
+  crane:`<g fill="#f6e7bd" stroke="#d8bf85" stroke-width=".6">
+    <path d="M12 13c-3-3-7-4-9-3 1 1 2 1.6 3 2-1.4.2-2.6.8-3.4 1.7 1.6.3 3 .4 4.2.3-1 .8-1.7 1.8-2 2.9 2-.4 3.8-1.2 5.2-2.3z"/>
+    <path d="M20 13c3-3 7-4 9-3-1 1-2 1.6-3 2 1.4.2 2.6.8 3.4 1.7-1.6.3-3 .4-4.2.3 1 .8 1.7 1.8 2 2.9-2-.4-3.8-1.2-5.2-2.3z"/></g>`,
+  flame:`<g fill="#ff9a4a" stroke="#d9631f" stroke-width=".6">
+    <path d="M12 13c-3-3-7-4-9-3 1 1 2 1.6 3 2-1.4.2-2.6.8-3.4 1.7 1.6.3 3 .4 4.2.3-1 .8-1.7 1.8-2 2.9 2-.4 3.8-1.2 5.2-2.3z"/>
+    <path d="M20 13c3-3 7-4 9-3-1 1-2 1.6-3 2 1.4.2 2.6.8 3.4 1.7-1.6.3-3 .4-4.2.3 1 .8 1.7 1.8 2 2.9-2-.4-3.8-1.2-5.2-2.3z"/></g>`,
+  azure:`<g fill="#9fe0f5" stroke="#4aa8c8" stroke-width=".6">
+    <path d="M12 13c-3-3-7-4-9-3 1 1 2 1.6 3 2-1.4.2-2.6.8-3.4 1.7 1.6.3 3 .4 4.2.3-1 .8-1.7 1.8-2 2.9 2-.4 3.8-1.2 5.2-2.3z"/>
+    <path d="M20 13c3-3 7-4 9-3-1 1-2 1.6-3 2 1.4.2 2.6.8 3.4 1.7-1.6.3-3 .4-4.2.3 1 .8 1.7 1.8 2 2.9-2-.4-3.8-1.2-5.2-2.3z"/></g>`
+};
 const COSMETICS={
-  skin:[
-    {id:'skin_base', n:'무명 탐험가', cost:0,  d:'기본 외형',       body:'#eac96b', head:'#ffe9a8'},
-    {id:'skin_red',  n:'홍의 무사',   cost:0, d:'붉은 옷차림',     body:'#c9433a', head:'#f3b0a6'},
-    {id:'skin_blue', n:'청의 선비',   cost:0, d:'푸른 옷차림',     body:'#3a72c9', head:'#a6c8f3'},
-    {id:'skin_jade', n:'벽옥 도령',   cost:0, d:'옥빛 옷차림',     body:'#2fa88a', head:'#a6f0dc'},
-    {id:'skin_gold', n:'금의 장원',   cost:0, d:'황금빛 옷차림',   body:'#d9a520', head:'#fff0b0'}
-  ],
   wing:[
-    {id:'wing_none', n:'없음',      cost:0,  d:'날개를 달지 않습니다'},
-    {id:'wing_crane',n:'백학의 날개',cost:0, d:'흰 학의 깃털 날개', col:'#ffffff'},
-    {id:'wing_moth', n:'나비 날개',  cost:0, d:'물빛 나비 날개',   col:'#7fe3f0'},
-    {id:'wing_flame',n:'불꽃 날개',  cost:0, d:'타오르는 날개',    col:'#ff9a4a'}
+    {id:'wing_none',  n:'없음',        cost:0, d:'날개를 달지 않습니다',       key:'none'},
+    {id:'wing_crane', n:'백학의 날개',  cost:0, d:'첨부 이미지의 금빛 깃털 날개', key:'crane'},
+    {id:'wing_azure', n:'창천의 날개',  cost:0, d:'물빛 깃털 날개',            key:'azure'},
+    {id:'wing_flame', n:'불꽃의 날개',  cost:0, d:'타오르는 깃털 날개',         key:'flame'}
   ],
   tail:[
-    {id:'tail_none',  n:'없음',     cost:0,  d:'잔상을 남기지 않습니다'},
-    {id:'tail_petal', n:'꽃잎 잔상', cost:0, d:'지나간 자리에 꽃잎', col:'#ff9ab0'},
-    {id:'tail_spark', n:'불티 잔상', cost:0, d:'지나간 자리에 불티', col:'#ffb45e'},
-    {id:'tail_mist',  n:'안개 잔상', cost:0, d:'지나간 자리에 안개', col:'#9fd8f0'}
+    {id:'tail_none',  n:'없음',     cost:0, d:'잔상을 남기지 않습니다'},
+    {id:'tail_petal', n:'꽃잎 잔상', cost:0, d:'지나온 길에 분홍 잔상', col:'#ff9ab0'},
+    {id:'tail_spark', n:'불티 잔상', cost:0, d:'지나온 길에 주황 잔상', col:'#ffb45e'},
+    {id:'tail_mist',  n:'안개 잔상', cost:0, d:'지나온 길에 하늘빛 잔상', col:'#9fd8f0'}
   ]
 };
-const COS_KINDS=[{k:'skin',n:'캐릭터 외형'},{k:'wing',n:'날개'},{k:'tail',n:'꼬리'}];
-let myCos={skin:['skin_base'],wing:['wing_none'],tail:['tail_none']};
-let myEquip={skin:'skin_base',wing:'wing_none',tail:'tail_none'};
+const COS_KINDS=[{k:'wing',n:'날개'},{k:'tail',n:'꼬리'}];
+let myCos={wing:['wing_none','wing_crane','wing_azure','wing_flame'],tail:['tail_none','tail_petal','tail_spark','tail_mist']};
+let myEquip={wing:'wing_none',tail:'tail_none'};
 const cosDef=(kind,id)=>COSMETICS[kind].find(x=>x.id===id)||COSMETICS[kind][0];
 
 const WIN_DIA={2:5,3:8,4:12,5:17,6:23};
@@ -4015,8 +4102,9 @@ async function loadAccount(){
     const d=await db.collection('users').doc(myUid).get();
     const u=d.data()||{};
     myDia=u.diamonds||0; myBag=u.bag||{};
-    if(u.cos) myCos=Object.assign({skin:['skin_base'],wing:['wing_none'],tail:['tail_none']},u.cos);
-    if(u.equip) myEquip=Object.assign({skin:'skin_base',wing:'wing_none',tail:'tail_none'},u.equip);
+    if(u.cos) myCos=Object.assign({wing:['wing_none','wing_crane','wing_azure','wing_flame'],
+                                   tail:['tail_none','tail_petal','tail_spark','tail_mist']},u.cos);
+    if(u.equip) myEquip=Object.assign({wing:'wing_none',tail:'tail_none'},u.equip);
     renderDia();
     $('myStats').innerHTML=`플레이 ${u.games||0}회 · 승리 ${u.wins||0}회 · `
       +`최고 카드 ${u.bestCards||0}장 · 최고 골드 ${(u.bestGold||0).toLocaleString()}G`;
@@ -4051,18 +4139,13 @@ function openShopDia(){
 /* 특정 부위를 바꿔봤을 때의 캐릭터 미리보기 SVG (나머지 부위는 현재 착용 중인 것 유지) */
 function previewCharSVG(kind,id){
   const eq=Object.assign({},myEquip,{[kind]:id});
-  const sk=cosDef('skin',eq.skin), wg=cosDef('wing',eq.wing), tl=cosDef('tail',eq.tail);
-  const wing = wg.col
-    ? `<path d="M5 15c-3.4-2-4.4 3.4-1 5.6 2.2 1.4 4.4.4 4.4-1.4z" fill="${wg.col}" opacity=".9"/>`
-     +`<path d="M21 15c3.4-2 4.4 3.4 1 5.6-2.2 1.4-4.4.4-4.4-1.4z" fill="${wg.col}" opacity=".9"/>`
-    : '';
-  const tail = tl.col
-    ? `<circle cx="20" cy="25" r="2.4" fill="${tl.col}" opacity=".55"/>`
-     +`<circle cx="23" cy="22" r="1.7" fill="${tl.col}" opacity=".4"/>`
-    : '';
-  return `<svg viewBox="0 0 28 30" xmlns="http://www.w3.org/2000/svg">${wing}${tail}`
-    +`<circle cx="14" cy="9" r="4.4" fill="${sk.head}"/>`
-    +`<path d="M6 27c0-5.2 3.6-9 8-9s8 3.8 8 9z" fill="${sk.body}"/></svg>`;
+  const wg=cosDef('wing',eq.wing), tl=cosDef('tail',eq.tail);
+  let extra='';
+  if(tl.col){
+    extra=`<g opacity=".5"><rect x="2" y="20" width="4" height="4" fill="${tl.col}" opacity=".35"/>`
+         +`<rect x="6" y="19" width="4" height="4" fill="${tl.col}" opacity=".6"/></g>`;
+  }
+  return charSVG(robeOf(myUid||player.name),{wing:(WING_SVG[wg.key]||'')+extra});
 }
 function renderShopDia(){
   renderDia();
@@ -4218,7 +4301,7 @@ function changeName(){
 /* ==================================================================
    상인 NPC · 채굴 강화 (모란 장터)
    ================================================================== */
-let upg={power:0,range:0};
+let upg={power:0,range:0,rangePower:0};
 const UPG_MAX=8;
 const upgCost=lv=>Math.round(1000*Math.pow(1.7,lv));
 function openMerchant(){
@@ -4228,8 +4311,9 @@ function openMerchant(){
 function renderMerchant(){
   $('merchGold').textContent=G(player.gold);
   const rows=[
-    {k:'power',n:'채굴 강도',d:'삽질 1회에 같은 칸을 여러 번 팝니다',eff:lv=>`1회 클릭 → ${1+lv}번 채굴`},
-    {k:'range',n:'채굴 범위',d:'주변 3×3 중 무작위 칸을 추가로 팝니다',eff:lv=>`주변 ${lv}칸 추가 채굴`}
+    {k:'power',n:'채굴 강도',d:'삽질 1회에 발밑 칸을 여러 번 팝니다',eff:lv=>`발밑 ${1+lv}번 채굴`},
+    {k:'range',n:'채굴 범위',d:'주변 3×3 중 무작위 칸을 추가로 팝니다',eff:lv=>`주변 ${lv}칸 추가 채굴`},
+    {k:'rangePower',n:'범위 강도',d:'추가로 파는 주변 칸을 여러 번 팝니다',eff:lv=>`주변 칸을 ${1+lv}번씩 채굴`}
   ];
   $('merchList').innerHTML='';
   rows.forEach(r=>{
