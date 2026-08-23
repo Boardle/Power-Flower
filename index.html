@@ -462,7 +462,7 @@
       <div class="chip dia-chip">💎 <b id="diaTxt">0</b></div>
       <button id="setBtn" class="chip" style="cursor:pointer">⚙ 설정</button>
       <div class="chip" id="buffChip" style="display:none">✨ <b id="buffTxt"></b></div>
-      <div class="chip round">🏛 원탁 <b id="rtTimer">200</b></div>
+      <div class="chip round" id="rtChip">🏛 원탁 <b id="rtTimer">200</b></div>
       <div class="chip">❤️ <div class="hpbar"><div class="hpfill" id="hpFill"></div></div> <b id="hpTxt">100</b></div>
       <div class="chip">💰 <b id="goldTxt">30G</b></div>
     </div>
@@ -844,12 +844,15 @@ const ITEMS=[{n:'세공증',w:40,d:'삽질 골드 +1G · 중첩 적용'},
              {n:'짱돌',w:0,d:'부하 몬스터 공격에 사용'},
              {n:'손실방어',w:20,d:'패배해도 카드 보호'},
              {n:'갈취',w:40,d:'다음 승리 시 카드 2장'}];
-function rollItem(){
-  if(isCoop()) return Math.random()<0.5?'세공증':'짱돌';
-  let r=Math.random()*100;
-  for(const it of ITEMS){ r-=it.w; if(r<=0) return it.n; }
+/* 아이템 추첨 — 난수 공급자(r)를 받아 결정론적으로도 쓸 수 있게 한다.
+   협동 맵(홍싸리 협곡)은 세공증·짱돌만 각 50%로 나온다. */
+function rollItemR(r){
+  if(isCoop()) return r()<0.5?'세공증':'짱돌';
+  let x=r()*100;
+  for(const it of ITEMS){ x-=it.w; if(x<=0) return it.n; }
   return ITEMS[0].n;
 }
+function rollItem(){ return rollItemR(Math.random); }
 const itemDesc=n=>(ITEMS.find(i=>i.n===n)||{}).d||'';
 const countItem=n=>player.items.filter(v=>v===n).length;
 /* 특수 블록: 4=카드무덤 5=골드무덤 6=미궁 */
@@ -984,7 +987,8 @@ function fmtCards(cards){
 function groupItems(items){
   const m=new Map();
   items.forEach(i=>m.set(i,(m.get(i)||0)+1));
-  return [...m.entries()];
+  /* 이름 오름차순 고정 정렬 — 한 개를 팔아도 목록 순서가 흔들리지 않는다 */
+  return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0],'ko'));
 }
 function announce(text){ sfx('bell');
   const d=document.createElement('div');
@@ -1593,8 +1597,7 @@ function resolveTile(i){
     player.gold+=amt; return {t:`${G(amt)} 획득`,k:'gold'};
   }
   if(k===3){
-    let x=r()*100, it=ITEMS[0].n;
-    for(const o of ITEMS){ x-=o.w; if(x<=0){ it=o.n; break; } }
+    const it=rollItemR(r);
     player.items.push(it); return {t:`${it} 획득!`,k:'item'};
   }
   return {t:'흙만 나왔습니다 · 꽝',k:'none'};
@@ -2122,6 +2125,7 @@ function centerInfo(main,sub){
 }
 
 function startRoundtable(){
+  if(isCoop()) return;              /* 협동 맵에는 원탁 단체배틀이 없다 */
   const parts=[player,...rivals].filter(p=>p.cards.length>0);
   if(parts.length<2){ log('참가자가 부족해 원탁이 열리지 않았습니다'); return; }
   gb={parts,active:parts.slice(),prize:rollPrize(),phase:'lead',order:[],turn:0,cur:null,turns:0};
@@ -2606,6 +2610,9 @@ function updateUI(){
   /* 협동 맵에서는 내 체력바를 숨긴다 */
   const hpChip=$('hpTxt')&&$('hpTxt').parentElement;
   if(hpChip) hpChip.style.display=isCoop()?'none':'flex';
+  /* 협동 맵에는 원탁 단체배틀이 없으므로 원탁 타이머도 숨긴다 */
+  const rtChip=$('rtChip');
+  if(rtChip) rtChip.style.display=isCoop()?'none':'flex';
   $('hpTxt').textContent=Math.max(0,player.hp);
   $('hpFill').style.width=clamp(player.hp/player.maxHp*100,0,100)+'%';
   $('goldTxt').textContent=G(player.gold);
@@ -3172,7 +3179,7 @@ function beginGame(seed){
   watchDigs(); watchDuels(); watchRT();
   restoreInv(); consumeBag();
   syncMe(true);
-  if(isHost) roomRef().set({rtNext:nowMs()+ROUNDTABLE_SEC*1000},{merge:true}).catch(()=>{});
+  if(isHost&&!isCoop()) roomRef().set({rtNext:nowMs()+ROUNDTABLE_SEC*1000},{merge:true}).catch(()=>{});
   db.collection('users').doc(myUid).set({
     games:firebase.firestore.FieldValue.increment(1)
   },{merge:true}).catch(()=>{});
@@ -3517,7 +3524,13 @@ function watchRT(){
     if(!d.exists) return;
     const r=d.data();
     if(r.rtNext) rtNextAt=r.rtNext;
-    if(r.boss&&boss){ boss.hp=r.boss.hp; boss.max=r.boss.max; updateUI();
+    if(r.boss&&boss){ boss.hp=r.boss.hp; boss.max=r.boss.max;
+      /* 다른 사람의 공격으로 20% 아래로 내려간 경우에도 부하가 나타나야 한다 */
+      if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*0.2){
+        boss.phase2=true; spawnMinions();
+        announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
+      }
+      updateUI();
       if(boss.hp<=0&&!gameOver) bossDefeated(); }
     if(r.evt&&r.evt.until>nowMs()){
       if(!eventZone||eventZone.until!==r.evt.until) startEvent(r.evt,r.evt.until);
@@ -3530,6 +3543,7 @@ function watchRT(){
 /* 남은 시간 표시 + 관리자의 원탁 개시 */
 setInterval(()=>{
   if(!started||!isMulti()||gameOver) return;
+  if(isCoop()) return;              /* 협동 맵에는 원탁 단체배틀이 없다 */
   if(!rtNextAt){ $('rtTimer').textContent='—'; return; }
   const left=Math.ceil((rtNextAt-nowMs())/1000);
   $('rtTimer').textContent=Math.max(0,left);
@@ -3547,6 +3561,7 @@ setInterval(()=>{
 
 /* ---------- 관리자: 원탁 시작 ---------- */
 async function mpStartRT(){
+  if(isCoop()) return;              /* 협동 맵에는 원탁 단체배틀이 없다 */
   const parts=[];
   if(player.cards.length>0) parts.push({uid:myUid,name:player.name});
   for(const uid in remotes) if(remotes[uid].cards>0) parts.push({uid,name:remotes[uid].name});
@@ -4632,7 +4647,15 @@ function spawnMinions(){
     const p=freeSpot();
     minions.push({id:'m'+k+'_'+nowMs(),x:p.x,y:p.y,hp:100});
   }
-  render(); drawMinimap();
+  /* 안전장치: 짱돌이 하나도 없으면 부하를 영영 잡지 못해 보스가 무적으로 굳는다.
+     부하 1마리당 5개가 필요하므로 최소 수량을 보장한다. */
+  const need=15-countItem('짱돌');
+  if(need>0){
+    for(let k=0;k<need;k++) player.items.push('짱돌');
+    log(`협곡의 돌무더기에서 짱돌 ${need}개를 주웠습니다.`);
+    markInvDirty();
+  }
+  render(); drawMinimap(); updateUI();
 }
 /* 부하는 1초마다 2칸씩 움직인다 */
 setInterval(()=>{
