@@ -2609,8 +2609,6 @@ function updateUI(){
   $('hpTxt').textContent=Math.max(0,player.hp);
   $('hpFill').style.width=clamp(player.hp/player.maxHp*100,0,100)+'%';
   $('goldTxt').textContent=G(player.gold);
-  $('cardTxt').textContent=player.cards.length;
-  $('itemTxt').textContent=player.items.length;
   $('invNote').style.display=player.cards.length?'none':'block';
   renderCardList($('invCards'),player.cards,'');
   const gi=groupItems(player.items);
