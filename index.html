@@ -496,16 +496,24 @@
         </div>
         <div class="side-actions">
           <button class="btn-red" id="attackBtn" disabled>⚔️ 공격 (E)</button>
+          <button class="btn-gold" id="ultBtn" style="display:none" disabled>🔥 필살기 (Q)</button>
           <button class="btn-cyan" id="shopBtn" disabled>🏪 교환소 (C)</button>
           <button id="exitBtn" style="display:none;font-size:11px;padding:7px 10px">🚪 로비로</button>
         </div>
         <div style="flex:1;min-width:180px;">
-          <div class="hint">
+          <div class="hint" id="hintNormal">
             <b>이동</b> 방향키 · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><br>
             <b>삽질</b> <kbd>Space</kbd> · 1G · <b>공격</b> <kbd>E</kbd> · <b>교환소</b> <kbd>C</kbd><br>
             <b>땡·광땡 카드</b>가 있어야 땡/광땡 족보를 제시할 수 있습니다.<br>
             <b>교환소 구역(3×3)</b> 안에서는 공격받지 않습니다.<br>
             <b>승리 조건</b> 12월 한 벌을 모아 교환소에서 [꽃의 훈장] 획득
+          </div>
+          <div class="hint" id="hintCoop" style="display:none">
+            <b>이동</b> 방향키 · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><br>
+            <b>삽질</b> <kbd>Space</kbd> · <b>필살기</b> <kbd>Q</kbd> · <b>부하 공격</b> <kbd>E</kbd> · <b>교환소/상인</b> <kbd>C</kbd><br>
+            <b>멧돼지 영역(5×5)</b> 위에서 삽질하면 보스를 공격합니다.<br>
+            <b>부하 3마리</b>가 남아 있는 동안 보스는 무적입니다 · 짱돌로만 처치<br>
+            <b>승리 조건</b> 모두 힘을 모아 멧돼지 체력 60,000을 깎아 토벌
           </div>
         </div>
       </div>
@@ -520,6 +528,8 @@
             <div><i style="background:#eac96b"></i>나</div>
             <div><i style="background:#a8382a"></i>라이벌</div>
             <div><i style="background:#3f8fa8"></i>교환소</div>
+            <div><i style="background:#d08a3a"></i>상인</div>
+            <div id="mmBossLeg" style="display:none"><i style="background:#e04a3a;box-shadow:0 0 0 1px #ffd76a"></i>멧돼지</div>
             <div><i style="background:#5a4a2a"></i>파본 곳</div>
           </div>
         </div>
@@ -818,7 +828,7 @@ const CARD_IMG={"10띠": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wB
 /* ================= 상수 ================= */
 /* 새로고침 후에도 어떤 빌드인지 바로 확인할 수 있도록 하는 버전 표시.
    파일을 수정할 때마다 이 값을 올려서 배포하면 화면에서 바로 구분됩니다. */
-const APP_VERSION = 'v1.6.2 · 2026-08-29';
+const APP_VERSION = 'v1.8.0 · 2026-08-25';
 
 let MAP=100;
 const VIEW_W=15, VIEW_H=11;
@@ -870,6 +880,23 @@ const isCoop=()=>!!theme().coop;
 const bossAt=(x,y)=>boss&&x>=boss.x&&x<boss.x+5&&y>=boss.y&&y<boss.y+5;
 /* 각 월 한 벌로 쓰는 필살기 (보스 최대 체력 대비 비율) */
 const ULT={12:0.15, 11:0.03, 10:0.005, 9:0.0012, 8:0.00025};
+/* 협동 맵 무덤 레벨 — 맵이 새로고침될 때마다 1씩 올라간다 (최대 5) */
+const GRAVE_LV=[{need:10,mul:1},{need:25,mul:3},{need:40,mul:5},{need:60,mul:8},{need:80,mul:12}];
+let coopRound=0;                  /* 협동 맵을 몇 번 갈아엎었는지 */
+const graveLv=()=>Math.min(GRAVE_LV.length,coopRound+1);
+const graveInfo=()=>GRAVE_LV[graveLv()-1];
+const graveMul=()=>isCoop()?graveInfo().mul:1;
+const graveTag=()=>isCoop()?` Lv.${graveLv()}`:'';
+/* 특수 타일 1칸을 완성하는 데 필요한 삽질 횟수 (협동 맵 무덤은 레벨을 따른다) */
+function specNeed(t){
+  const sp=SPECIAL[t];
+  if(!sp) return 1;
+  if(isCoop()&&(t===4||t===5)) return graveInfo().need;
+  return sp.need;
+}
+/* 협동 맵 임시 삽질 강도 강화 (미궁 전리품) */
+const COOP_POWER_BONUS=5;
+const digPowerNow=()=>upg.power+(isCoop()&&player.coopPowerUntil>Date.now()?COOP_POWER_BONUS:0);
 const N_CARDGRAVE=32, N_GOLDGRAVE=32, N_MAZE=34;
 let SHOPS=[];
 const INVUL_MS=5000, BET_LIMIT=7.0, ROUNDTABLE_SEC=200, REJOIN_COST=1000;
@@ -880,7 +907,8 @@ let tiles=new Uint8Array(MAP*MAP), dug=new Uint8Array(MAP*MAP);
 let shopAt={}, shopCore={}, merchantAt={}, merchantCore={};
 let MERCHANTS=[];
 const player={name:'탐험가',x:0,y:0,hp:100,maxHp:100,gold:30,cards:[],items:[],invulUntil:0,
-              invisibleUntil:0,digBoostUntil:0,autoDigUntil:0,autoMoveUntil:0,isMe:true};
+              invisibleUntil:0,digBoostUntil:0,autoDigUntil:0,autoMoveUntil:0,
+              coopPowerUntil:0,isMe:true};
 let lastDir=[0,1];
 let trail=[];   /* 꼬리 잔상용 최근 경로 */
 let rivals=[], battleFoe=null, betTimer=null, betLeft=BET_LIMIT, gameOver=false;
@@ -921,8 +949,10 @@ function dropTable(){
 }
 function rollCard(){
   let r=Math.random()*100;
-  r-=P_DDAENG;        if(r<=0) return specialCard('ddaeng');
-  r-=P_GWANGDDAENG;   if(r<=0) return specialCard('gwangddaeng');
+  if(!isCoop()){          /* 협동 맵에서는 [땡]·[광땡]이 나오지 않는다 */
+    r-=P_DDAENG;        if(r<=0) return specialCard('ddaeng');
+    r-=P_GWANGDDAENG;   if(r<=0) return specialCard('gwangddaeng');
+  }
   for(const [m,w] of dropTable()){ r-=w; if(r<=0) return cardOf(m); }
   return cardOf(1);
 }
@@ -1309,14 +1339,16 @@ function buildTiles(seed){
       tiles[i]=type; placed++;
     }
   };
-  place(4,Math.max(2,Math.round(th.grave*scale)));
+  const graveX=isCoop()?5:1;   /* 협동 맵은 무덤이 5배로 깔린다 */
+  place(4,Math.max(2,Math.round(th.grave*scale))*graveX);
   if(mapTheme==='moran'&&mapStage===1) place(5,15);
   else if(mapTheme==='moran'&&mapStage===2) place(5,60);
-  else place(5,Math.max(2,Math.round(th.gold*scale)));
+  else place(5,Math.max(2,Math.round(th.gold*scale))*graveX);
   place(6,Math.max(1,Math.round(th.maze*scale)));
   if(th.tele) place(9,Math.max(2,Math.round(th.tele*scale)));
   if(th.chest) place(11,Math.max(1,Math.round(th.chest*scale)));
-  /* 협동 맵: 5×5 멧돼지 보스 배치 */
+  /* 협동 맵: 5×5 멧돼지 보스 배치 (체력·부하는 맵을 갈아엎어도 그대로) */
+  const prevBoss=boss, prevMin=minions;
   boss=null; minions=[];
   if(isCoop()){
     for(let g=0;g<3000;g++){
@@ -1332,8 +1364,15 @@ function buildTiles(seed){
         tiles[j]=T_BOSS; dug[j]=1;
       }
       const hp=60000;
-      boss={x:bx,y:by,hp,max:hp,phase2:false};
-      myBossDmg=0;                      /* 내가 깎은 누적 피해 */
+      boss=prevBoss
+        ? {x:bx,y:by,hp:prevBoss.hp,max:prevBoss.max,phase2:prevBoss.phase2}
+        : {x:bx,y:by,hp,max:hp,phase2:false};
+      if(prevBoss){
+        minions=prevMin;
+        /* 새 지형에서 벽에 갇히지 않도록 부하 위치를 다시 잡아준다 */
+        minions.forEach(m=>{ const s2=freeSpot(); m.x=s2.x; m.y=s2.y; });
+      }
+      /* 기여도(myBossDmg)는 맵을 갈아엎어도 유지된다 — 판이 새로 시작될 때만 초기화한다 */
       break;
     }
   }
@@ -1358,11 +1397,22 @@ function regenMap(){
   announce(`땅이 모두 파헤쳐졌습니다! ${theme().name} ${MAP}×${MAP} 구역으로 이동합니다`);
   render(); drawMinimap(); updateUI();
 }
+/* 협동 맵이 새로 깔릴 때마다 모든 참가자에게 1,000G를 지급하고 무덤 레벨을 올린다 */
+function coopMapRefreshReward(){
+  const before=graveLv();
+  coopRound++;
+  player.gold+=1000;
+  digMsg('땅을 모두 파헤쳤습니다 · 1,000G 지급','gold');
+  log('새 땅으로 교체 · <b>1,000G</b> 지급');
+  const after=graveLv();
+  if(after>before) announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${after} (체력 ${graveInfo().need} · 획득량 ×${graveInfo().mul})`);
+  markInvDirty();
+}
 function checkMapExhausted(){
   if(MODE!=='solo'){
     /* 멀티: 방장만 판정해서 방 문서를 갱신 → 모든 클라이언트가 이를 보고 따라간다 */
     if(!isKeeper||digProgAtomicGuard) return;
-    if(dugCount>=DIGGABLE*0.85){
+    if(dugCount>=DIGGABLE*(isCoop()?0.95:0.85)){
       digProgAtomicGuard=true;
       mpAdvanceMap().finally(()=>{ digProgAtomicGuard=false; });
     }
@@ -1371,14 +1421,8 @@ function checkMapExhausted(){
   const th=isCoop()?0.95:0.85;
   if(dugCount>=DIGGABLE*th){
     if(isCoop()){
-      player.gold+=1000;
-      digMsg('땅을 모두 파헤쳤습니다 · 1,000G 지급','gold');
-      const keepBoss=boss;
-      regenMap();
-      boss=keepBoss;   /* 보스는 그대로 둔다 */
-      if(boss) for(let dy=0;dy<5;dy++)for(let dx=0;dx<5;dx++){
-        const j=idx(boss.x+dx,boss.y+dy); tiles[j]=T_BOSS; dug[j]=1;
-      }
+      coopMapRefreshReward();
+      regenMap();                       /* 보스 체력·부하는 buildTiles가 그대로 이어받는다 */
       render(); drawMinimap(); updateUI();
       return;
     }
@@ -1402,11 +1446,22 @@ async function mpAdvanceMap(){
 function mpApplyMap(r,announceIt){
   mapTheme=r.theme||mapTheme;
   mapStage=r.mapStage||0;
+  const prevGen=mapGen;
   mapGen=r.mapGen||0;
   mapSeed=r.seed;
-  buildTiles(mapSeed);
+  const advanced=announceIt&&isCoop()&&mapGen>prevGen;
+  /* 협동 맵: 갱신 횟수를 mapGen에 맞춰 두면 모든 클라이언트의 무덤 레벨이 같아진다 */
+  if(isCoop()) coopRound=mapGen;
+  buildTiles(mapSeed);                /* 보스 체력·부하는 buildTiles가 그대로 이어받는다 */
   const p=freeSpot(); player.x=p.x; player.y=p.y;
   watchDigs();
+  if(advanced){
+    player.gold+=1000;
+    digMsg('땅을 모두 파헤쳤습니다 · 1,000G 지급','gold');
+    log('새 땅으로 교체 · <b>1,000G</b> 지급');
+    announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${graveLv()} (체력 ${graveInfo().need} · 획득량 ×${graveInfo().mul})`);
+    markInvDirty(); syncMe(true);
+  }
   if(announceIt) announce(`땅이 모두 파헤쳐졌습니다! ${theme().name} ${MAP}×${MAP} 구역으로 이동합니다`);
   render(); drawMinimap(); updateUI();
 }
@@ -1449,7 +1504,7 @@ function render(){
     else if(merchantAt[i]) c.classList.add('merch');
     else if(sp&&!dug[i]){
       c.classList.add(sp.cls);
-      c.innerHTML=icHTML(sp.ic)+`<span class="prog">${digCnt[i]||0}/${sp.need}</span>`;
+      c.innerHTML=icHTML(sp.ic)+`<span class="prog">${digCnt[i]||0}/${specNeed(tiles[i])}</span>`;
     }
     else if(!dug[i]){
       c.classList.add('fog');
@@ -1518,6 +1573,16 @@ function drawMinimap(){
     mm.fillStyle='rgba(255,140,190,.75)';
     mm.fillRect(eventZone.x,eventZone.y,5,5);
   }
+  /* 협동 맵: 멧돼지 보스 5×5 영역을 또렷하게 표시 */
+  if(boss&&isCoop()){
+    mm.fillStyle=minions.length?'rgba(150,150,160,.85)':'rgba(224,74,58,.85)';
+    mm.fillRect(boss.x,boss.y,5,5);
+    mm.strokeStyle='#ffd76a';
+    mm.lineWidth=Math.max(0.6,1.6/S);
+    mm.strokeRect(boss.x-mm.lineWidth/2,boss.y-mm.lineWidth/2,5+mm.lineWidth,5+mm.lineWidth);
+    mm.fillStyle='#ff9a4a';
+    minions.forEach(m=>mm.fillRect(m.x-MH,m.y-MH,MK,MK));
+  }
   mm.fillStyle='#3f8fa8'; SHOPS.forEach(s=>mm.fillRect(s.x-MH,s.y-MH,MK,MK));
   mm.fillStyle='#d08a3a'; MERCHANTS.forEach(s=>mm.fillRect(s.x-MH,s.y-MH,MK,MK));
   mm.fillStyle='#a8382a'; rivals.forEach(r=>mm.fillRect(r.x-MH,r.y-MH,MK,MK));
@@ -1563,8 +1628,10 @@ function cardOfR(m,r,tag){
 }
 function rollCardR(r,tag){
   let x=r()*100;
-  x-=P_DDAENG;      if(x<=0) return {month:0,name:'땡',type:'ddaeng',id:tag};
-  x-=P_GWANGDDAENG; if(x<=0) return {month:0,name:'광땡',type:'gwangddaeng',id:tag};
+  if(!isCoop()){          /* 협동 맵에서는 [땡]·[광땡]이 나오지 않는다 */
+    x-=P_DDAENG;      if(x<=0) return {month:0,name:'땡',type:'ddaeng',id:tag};
+    x-=P_GWANGDDAENG; if(x<=0) return {month:0,name:'광땡',type:'gwangddaeng',id:tag};
+  }
   for(const [m,w] of dropTable()){ x-=w; if(x<=0) return cardOfR(m,r,tag); }
   return cardOfR(1,r,tag);
 }
@@ -1640,20 +1707,14 @@ function openChest(){
   for(const c of CHEST){ r-=c.w; if(r<=0) return c.run(); }
   return CHEST[0].run();
 }
-const MAZE=[
+/* 모든 맵 공통 전리품 */
+const MAZE_COMMON=[
   ()=>{ const v=Math.min(player.gold,500); player.gold-=v;
         return {t:`함정! ${G(v)} 상실`,k:'warn',ic:'🕳',e:`함정 · ${G(v)} 상실`}; },
   ()=>{ const v=Math.min(player.gold,100); player.gold-=v;
         return {t:`함정! ${G(v)} 상실`,k:'warn',ic:'🕳',e:`함정 · ${G(v)} 상실`}; },
   ()=>{ player.gold+=100; return {t:'100G 발견!',k:'gold',ic:'💰',e:'100G 발견'}; },
   ()=>{ player.gold+=500; return {t:'500G 발견!',k:'gold',ic:'💰',e:'500G 발견'}; },
-  ()=>{ player.hp-=20; return {t:'독기! 체력 -20',k:'warn',ic:'☠️',e:'독기 · 체력 -20'}; },
-  ()=>{ player.hp=Math.min(player.maxHp,player.hp+20);
-        return {t:'약수! 체력 +20',k:'item',ic:'🌿',e:'약수 · 체력 +20'}; },
-  ()=>{ player.hp=Math.min(player.maxHp,player.hp+50);
-        return {t:'영약! 체력 +50',k:'item',ic:'🍶',e:'영약 · 체력 +50'}; },
-  ()=>{ player.invisibleUntil=Date.now()+BUFF_MS;
-        return {t:'투명화! 30초',k:'item',ic:'👻',e:'투명화 · 30초간 라이벌이 추적하지 못함'}; },
   ()=>{ player.digBoostUntil=Date.now()+BUFF_MS;
         return {t:'삽질 강화! 30초',k:'item',ic:'⚡',e:'삽질 강화 · 30초간 상하좌우 동시 채굴'}; },
   ()=>{ player.autoDigUntil=Date.now()+BUFF_MS;
@@ -1661,16 +1722,40 @@ const MAZE=[
   ()=>{ player.autoMoveUntil=Date.now()+BUFF_MS;
         return {t:'자동 이동! 30초',k:'item',ic:'🏃',e:'자동 이동 · 30초간 초당 5칸 전진 (방향키로 조향)'}; }
 ];
+/* 일반 맵 전용 — 체력 증감·투명화는 협동 맵에서 의미가 없으므로 제외한다 */
+const MAZE_SOLO=[
+  ()=>{ player.hp-=20; return {t:'독기! 체력 -20',k:'warn',ic:'☠️',e:'독기 · 체력 -20'}; },
+  ()=>{ player.hp=Math.min(player.maxHp,player.hp+20);
+        return {t:'약수! 체력 +20',k:'item',ic:'🌿',e:'약수 · 체력 +20'}; },
+  ()=>{ player.hp=Math.min(player.maxHp,player.hp+50);
+        return {t:'영약! 체력 +50',k:'item',ic:'🍶',e:'영약 · 체력 +50'}; },
+  ()=>{ player.invisibleUntil=Date.now()+BUFF_MS;
+        return {t:'투명화! 30초',k:'item',ic:'👻',e:'투명화 · 30초간 라이벌이 추적하지 못함'}; }
+];
+/* 협동 맵(홍싸리 협곡) 전용 */
+const MAZE_COOP=[
+  ()=>{ player.coopPowerUntil=Date.now()+BUFF_MS;
+        return {t:`삽질 강도 +${COOP_POWER_BONUS}강! 30초`,k:'item',ic:'⛏',
+                e:`삽질 강도 강화 · 30초간 +${COOP_POWER_BONUS}강 (한 번에 ${1+digPowerNow()}회 채굴)`}; },
+  ()=>{ if(boss){
+          boss.hp=Math.min(boss.max,boss.hp+1000); syncBoss(-1000);
+          return {t:'멧돼지가 약초를 삼켰습니다! 보스 체력 +1,000',k:'warn',ic:'🐗',
+                  e:'멧돼지 회복 · 보스 체력 +1,000'};
+        }
+        player.gold+=100; return {t:'100G 발견!',k:'gold',ic:'💰',e:'100G 발견'}; }
+];
+const MAZE=MAZE_COMMON.concat(MAZE_SOLO);
+const mazeTable=()=>isCoop()?MAZE_COMMON.concat(MAZE_COOP):MAZE;
 /* 한 칸에 삽질 1회를 적용 (반환: 완료 여부) */
 function digOnce(i,quiet){
   const sp=SPECIAL[tiles[i]];
-  const need=sp?sp.need:tileNeed(i);
+  const need=sp?specNeed(tiles[i]):tileNeed(i);
   if(dug[i]) return false;
   player.gold-=1;
   if(need>1){
     const n=(digCnt[i]||0)+1; digCnt[i]=n;
     if(n<need){
-      if(!quiet) digMsg(`${sp?sp.n:'단단한 땅'} 채굴 ${n}/${need}`,'none');
+      if(!quiet) digMsg(`${sp?sp.n+((tiles[i]===4||tiles[i]===5)?graveTag():''):'단단한 땅'} 채굴 ${n}/${need}`,'none');
       return false;
     }
     delete digCnt[i];
@@ -1678,15 +1763,16 @@ function digOnce(i,quiet){
   if(sp){
     markDug(i);
     if(tiles[i]===4){
-      const cnt=5+Math.floor(Math.random()*6), got=[];
+      const cnt=(5+Math.floor(Math.random()*6))*graveMul(), got=[];
       for(let k=0;k<cnt;k++) got.push(giveCard(player,rollCard()));
-      digMsg(`카드무덤! 카드 ${cnt}장 획득`,'card'); sfx('grave');
+      digMsg(`카드무덤${graveTag()}! 카드 ${cnt}장 획득`,'card'); sfx('grave');
       log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
     }else if(tiles[i]===5){
       const base=3+countItem('세공증')+Math.floor(Math.random()*15);
-      const mul=5+Math.floor(Math.random()*6), amt=Math.round(base*mul*goldMul());
+      const mul=(5+Math.floor(Math.random()*6))*graveMul();
+      const amt=Math.round(base*mul*goldMul());
       player.gold+=amt;
-      digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
+      digMsg(`골드무덤${graveTag()}! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
       log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
     }else if(tiles[i]===9){
       const p=freeSpot(); player.x=p.x; player.y=p.y;
@@ -1698,7 +1784,8 @@ function digOnce(i,quiet){
       digMsg(res.t,res.k); log(`보물상자 · ${res.e}`); sfx('diamond');
       if(res.card) showLootCards([res.card]); else showLootEffect(ICON.chest,`보물상자 · ${res.e}`);
     }else{
-      const r=MAZE[Math.floor(Math.random()*MAZE.length)]();
+      const MT=mazeTable();
+      const r=MT[Math.floor(Math.random()*MT.length)]();
       digMsg(r.t,r.k); log(`미궁 · ${r.e}`);
       showLootEffect(ICON.maze,`미궁 · ${r.e}`); sfx('maze');
     }
@@ -1727,7 +1814,7 @@ function dig(auto){
   if(isMulti()){ digLock=true; mpDig(i,auto).finally(()=>{ digLock=false; refreshActions(); }); return; }
 
   /* 채굴 강도: 같은 칸을 1+n번 판다 */
-  const reps=1+upg.power;
+  const reps=1+digPowerNow();
   for(let k=0;k<reps;k++){
     if(dug[i]||player.gold<1) break;
     if(digOnce(i,k>0&&!dug[i]&&k<reps-1)) break;
@@ -1843,16 +1930,37 @@ function adjacentFoe(){
   return null;
 }
 function refreshActions(){
-  const foe=isMulti()?adjacentRemoteFoe():adjacentFoe();
-  const ab=$('attackBtn');
-  ab.disabled=!foe||busy()||gameOver||!!duel;
-  ab.textContent=inShop(player)?'🛡 안전지대':(foe?`⚔️ ${foe.name} 공격 (E)`:'⚔️ 공격 (E)');
+  const ab=$('attackBtn'), ub=$('ultBtn'), leg=$('mmBossLeg');
+  const coop=isCoop();
+  if(leg) leg.style.display=coop?'block':'none';
+  const hn=$('hintNormal'), hc=$('hintCoop');
+  if(hn) hn.style.display=coop?'none':'block';
+  if(hc) hc.style.display=coop?'block':'none';
+  if(coop){
+    /* 협동 맵: E는 부하 공격, Q는 필살기 */
+    const m=adjacentMinion();
+    ab.disabled=!m||busy()||gameOver;
+    ab.textContent=m?`⚔️ 부하 공격 (E) · 짱돌 ${countItem('짱돌')}개`:'⚔️ 공격 (E)';
+    ub.style.display='block';
+    let ready=0;
+    for(let mo=8;mo<=12;mo++) if(setProgress(player,mo)>=4) ready++;
+    ub.disabled=busy()||gameOver||!boss;
+    ub.textContent=ready?`🔥 필살기 (Q) · ${ready}종 사용 가능`:'🔥 필살기 (Q)';
+    ub.style.filter=ready?'':'grayscale(.6)';
+  }else{
+    const foe=isMulti()?adjacentRemoteFoe():adjacentFoe();
+    ab.disabled=!foe||busy()||gameOver||!!duel;
+    ab.textContent=inShop(player)?'🛡 안전지대':(foe?`⚔️ ${foe.name} 공격 (E)`:'⚔️ 공격 (E)');
+    ub.style.display='none';
+  }
   const oni=idx(player.x,player.y);
   $('shopBtn').disabled=!(shopAt[oni]||merchantAt[oni])||busy()||gameOver;
   $('shopBtn').textContent=merchantAt[oni]?'상인 (C)':'교환소 (C)';
 }
+$('ultBtn').onclick=()=>{ if(!busy()&&isCoop()) openUlt(); };
 setInterval(refreshActions,400);
 $('attackBtn').onclick=()=>{
+  if(isCoop()){ if(!attackMinion()) toast('인접한 부하가 없습니다'); return; }
   if(isMulti()){ const f=adjacentRemoteFoe(); if(f) challenge(f); else toast('공격할 대상이 없습니다'); return; }
   const f=adjacentFoe(); if(f) openBattle(f);
 };
@@ -2602,7 +2710,8 @@ function updateUI(){
       $('bossPct').innerHTML=pct.toFixed(1)+'%'
         +(minions.length?` <span style="color:#ff9a4a">· 부하 ${minions.length}마리 남음 (보스 무적)</span>`:'');
       $('bossHpTxt').textContent=boss.hp.toLocaleString()+' / '+boss.max.toLocaleString()
-        +'  ·  내 기여 '+share.toFixed(1)+'%';
+        +'  ·  내 기여 '+share.toFixed(1)+'%'
+        +'  ·  무덤 Lv.'+graveLv()+' (체력 '+graveInfo().need+' · 획득 ×'+graveInfo().mul+')';
       $('bossFill').style.width=pct+'%';
       $('bossFill').style.filter=minions.length?'grayscale(.7)':'';
     }else bb.style.display='none';
@@ -2626,6 +2735,8 @@ function updateUI(){
   const now=Date.now(), bf=[];
   if(player.invisibleUntil>now) bf.push(`투명화 ${Math.ceil((player.invisibleUntil-now)/1000)}s`);
   if(player.digBoostUntil>now) bf.push(`삽질강화 ${Math.ceil((player.digBoostUntil-now)/1000)}s`);
+  if(isCoop()&&player.coopPowerUntil>now)
+    bf.push(`삽질강도 +${COOP_POWER_BONUS}강 ${Math.ceil((player.coopPowerUntil-now)/1000)}s (${1+digPowerNow()}회)`);
   if(player.autoDigUntil>now) bf.push(`자동삽질 ${Math.ceil((player.autoDigUntil-now)/1000)}s`);
   if(player.autoMoveUntil>now) bf.push(`자동이동 ${Math.ceil((player.autoMoveUntil-now)/1000)}s`);
   $('buffChip').style.display=bf.length?'flex':'none';
@@ -2989,18 +3100,45 @@ function openRoomView(){
     ? '방장입니다. 모두 모이면 게임 시작을 누르세요.'
     : '방장이 시작할 때까지 기다려 주세요.';
   watchRoomPlayers();
+  watchRoomDoc();
+}
+/* 방 문서 리스너는 클라이언트당 정확히 하나만 유지한다.
+   (예전에는 대기실과 원탁 감시가 각각 하나씩 붙여 방 문서 읽기 비용이 2배였다) */
+let roomDocWatched=false;
+function watchRoomDoc(){
+  if(roomDocWatched) return;
+  roomDocWatched=true;
   const un=roomRef().onSnapshot(d=>{
     if(!d.exists) return;
     const r=d.data();
-    $('roomTitle').textContent=r.name||'대기실';
+    /* --- 대기실 --- */
+    const rt=$('roomTitle'); if(rt) rt.textContent=r.name||'대기실';
     if(!started){
       if(r.theme&&THEMES[r.theme]){ mapTheme=r.theme; }
       if(typeof r.mapStage==='number') mapStage=r.mapStage;
       if(typeof r.mapGen==='number') mapGen=r.mapGen;
     }
     if(r.startedAt) gameStartAt=r.startedAt;
-    if(r.status==='playing'&&!started){ mapSeed=r.seed; beginGame(r.seed); }
-  });
+    if(r.status==='playing'&&!started){ mapSeed=r.seed; beginGame(r.seed); return; }
+    /* --- 게임 중 --- */
+    if(r.rtNext) rtNextAt=r.rtNext;
+    if(r.boss&&boss&&typeof r.boss.hp==='number'){ boss.hp=r.boss.hp;
+      /* max/x/y는 시드로 결정되어 모든 클라이언트가 이미 동일하게 계산해 두었으므로
+         원격에서는 hp(실시간으로 변하는 값)만 받아온다 */
+      /* 다른 사람의 공격으로 20% 아래로 내려간 경우에도 부하가 나타나야 한다 */
+      if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*0.2){
+        boss.phase2=true; spawnMinions();
+        announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
+      }
+      updateUI();
+      if(boss.hp<=0&&!gameOver) bossDefeated(); }
+    if(r.evt&&r.evt.until>nowMs()){
+      if(!eventZone||eventZone.until!==r.evt.until) startEvent(r.evt,r.evt.until);
+    }
+    if(started&&typeof r.mapGen==='number'&&r.mapGen!==mapGen){
+      mpApplyMap(r,true);
+    }
+  },err=>console.error(err));
   unsubs.push(un);
 }
 let playersWatched=false;
@@ -3065,9 +3203,12 @@ function watchRoomPlayers(){
   unsubs.push(un);
 }
 
-/* 하트비트: 살아있음을 주기적으로 알림 */
+/* 하트비트: 살아있음을 주기적으로 알림.
+   syncMe가 이미 t를 갱신하고 있으면 중복 쓰기이므로 건너뛴다. */
 setInterval(()=>{
   if(!inRoom()||!fbReady) return;
+  if(nowMs()-lastSyncAt<BEAT_MS) return;
+  lastSyncAt=nowMs();
   meRef().set({t:SVT()},{merge:true}).catch(()=>{});
 },BEAT_MS);
 
@@ -3096,7 +3237,11 @@ async function leaveRoom(){
   }catch(e){ console.error(e); }
   unsubs.forEach(u=>{ try{ u(); }catch(e){} });
   unsubs=[];
-  roomId=null; isHost=false; isKeeper=false; playersWatched=false; rtClosedId=0; remotes={}; MODE='solo';
+  roomId=null; isHost=false; isKeeper=false; playersWatched=false; roomDocWatched=false; rtClosedId=0; remotes={}; MODE='solo';
+  _digPending={}; _digPendingGen=-1;
+  if(_digFlushTimer){ clearTimeout(_digFlushTimer); _digFlushTimer=null; }
+  if(_bossFlushTimer){ clearTimeout(_bossFlushTimer); _bossFlushTimer=null; }
+  _bossPendingDmg=0;
   started=false; gameOver=false;
   $('scoreWrap').style.display='none';
   ['roomOverlay','shopOverlay','rtOverlay','packOverlay','battleOverlay','winOverlay']
@@ -3211,24 +3356,53 @@ function watchDigs(){
   },err=>console.error(err));
   unsubs.push(unsubDigs);
 }
+/* 채굴 기록은 타일 하나마다 보내지 않고 잠시 모았다가 한 번에 보낸다.
+   digs 청크 문서는 전원이 구독하고 스냅샷마다 문서 전체가 전송되므로,
+   쓰기 횟수를 줄이면 읽기와 전송량이 함께 크게 줄어든다. */
+let _digPending={}, _digFlushTimer=null, _digPendingGen=-1;
+function flushDigs(){
+  _digFlushTimer=null;
+  const gen=_digPendingGen, pending=_digPending;
+  _digPending={};
+  if(gen!==mapGen) return;        /* 이미 다음 맵으로 넘어갔으면 버린다 */
+  Object.keys(pending).forEach(chunk=>{
+    roomRef().collection('digs').doc(gen+'c'+chunk)
+      .set(pending[chunk],{merge:true}).catch(e=>console.error(e));
+  });
+}
 function pushDig(i){
   if(!isMulti()) return;
-  roomRef().collection('digs').doc(mapGen+'c'+Math.floor(i/CHUNK))
-    .set({[String(i)]:1},{merge:true}).catch(e=>console.error(e));
+  if(_digPendingGen!==mapGen){    /* 맵이 바뀌면 이전 세대의 대기분은 폐기 */
+    _digPending={}; _digPendingGen=mapGen;
+  }
+  const chunk=Math.floor(i/CHUNK);
+  (_digPending[chunk]=_digPending[chunk]||{})[String(i)]=1;
+  if(!_digFlushTimer) _digFlushTimer=setTimeout(flushDigs,1500);
 }
 
-/* ---------- 내 상태 동기화 (0.5초 스로틀) ---------- */
-let lastSent='';
+/* ---------- 내 상태 동기화 ----------
+   players 컬렉션은 전원이 구독하므로 "쓰기 1회 = 인원수만큼 읽기"로 증폭된다.
+   따라서 값이 실제로 변했을 때만, 그것도 최소 간격을 두고 보낸다.
+     · 즉시성이 필요한 값(위치·체력·투명화) = hot  → 1.2초 간격
+     · 점수판에만 쓰이는 값(골드·카드 수)      = cold → 6초 간격
+   골드는 삽질마다 1G씩 변하므로 hot에 넣으면 스로틀이 무력화된다. */
+let lastHot='', lastCold='', lastSyncAt=0, lastColdAt=0;
+const HOT_MS=1200, COLD_MS=6000;
 function syncMe(force){
   if(!isMulti()) return;
-  const sig=`${player.x},${player.y},${player.hp},${player.gold},${player.cards.length},${player.invisibleUntil>nowMs()?1:0}`;
-  if(!force&&sig===lastSent) return;
-  lastSent=sig;
-  meRef().set({
-    name:player.name,x:player.x,y:player.y,hp:player.hp,
-    gold:player.gold,cards:player.cards.length,
-    invisUntil:player.invisibleUntil||0,t:SVT()
-  },{merge:true}).catch(e=>console.error(e));
+  const now=nowMs();
+  const hot=`${player.x},${player.y},${player.hp},${player.invisibleUntil>nowMs()?1:0}`;
+  const cold=`${player.gold},${player.cards.length}`;
+  const hotDue = hot!==lastHot && now-lastSyncAt>=HOT_MS;
+  const coldDue = cold!==lastCold && now-lastColdAt>=COLD_MS;
+  if(!force&&!hotDue&&!coldDue) return;
+
+  const d={name:player.name,x:player.x,y:player.y,hp:player.hp,
+           invisUntil:player.invisibleUntil||0,t:SVT()};
+  if(force||coldDue){ d.gold=player.gold; d.cards=player.cards.length;
+                      lastCold=cold; lastColdAt=now; }
+  lastHot=hot; lastSyncAt=now;
+  meRef().set(d,{merge:true}).catch(e=>console.error(e));
 }
 setInterval(()=>{ if(started&&isMulti()) syncMe(); },500);
 
@@ -3246,6 +3420,7 @@ setInterval(()=>{
 window.addEventListener('beforeunload',()=>{
   try{
     if(!isMulti()) return;
+    flushDigs();                 /* 모아둔 채굴 기록을 남기고 나간다 */
     meRef().delete();
     if(Object.keys(remotes).length===0) roomRef().set({status:'ended',count:0},{merge:true});
   }catch(e){}
@@ -3254,7 +3429,7 @@ window.addEventListener('beforeunload',()=>{
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden||!inRoom()||!fbReady) return;
   /* 탭이 쉬는 동안 하트비트가 끊겨 유령 처리됐을 수 있으므로 내 정보를 통째로 되살린다 */
-  lastSent='';
+  lastHot=''; lastCold='';
   meRef().set({
     name:player.name,x:player.x,y:player.y,hp:player.hp,
     gold:player.gold,cards:player.cards.length,
@@ -3268,7 +3443,7 @@ setInterval(()=>{
   if(!inRoom()||!fbReady) return;
   meRef().get().then(d=>{
     if(d.exists) return;
-    lastSent='';
+    lastHot=''; lastCold='';
     meRef().set({
       name:player.name,x:player.x,y:player.y,hp:player.hp,
       gold:player.gold,cards:player.cards.length,t:SVT()
@@ -3520,25 +3695,9 @@ function watchRT(){
     }
     renderMPRT();
   },err=>console.error(err)));
-  unsubs.push(roomRef().onSnapshot(d=>{
-    if(!d.exists) return;
-    const r=d.data();
-    if(r.rtNext) rtNextAt=r.rtNext;
-    if(r.boss&&boss){ boss.hp=r.boss.hp; boss.max=r.boss.max;
-      /* 다른 사람의 공격으로 20% 아래로 내려간 경우에도 부하가 나타나야 한다 */
-      if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*0.2){
-        boss.phase2=true; spawnMinions();
-        announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
-      }
-      updateUI();
-      if(boss.hp<=0&&!gameOver) bossDefeated(); }
-    if(r.evt&&r.evt.until>nowMs()){
-      if(!eventZone||eventZone.until!==r.evt.until) startEvent(r.evt,r.evt.until);
-    }
-    if(started&&typeof r.mapGen==='number'&&r.mapGen!==mapGen){
-      mpApplyMap(r,true);
-    }
-  }));
+  /* 방 문서 리스너는 watchRoomDoc()이 이미 하나만 유지한다.
+     중복으로 붙이면 방 문서 쓰기 1회마다 읽기가 2배로 든다. */
+  watchRoomDoc();
 }
 /* 남은 시간 표시 + 관리자의 원탁 개시 */
 setInterval(()=>{
@@ -3962,12 +4121,12 @@ async function claimProgress(i,need){
 }
 async function mpDig(i,auto){
   const sp=SPECIAL[tiles[i]];
-  const need=sp?sp.need:tileNeed(i);
+  const need=sp?specNeed(tiles[i]):tileNeed(i);
   const gen=mapGen;
 
   if(need>1){
     /* 채굴 강도: 서버 진행도를 (1+power)번까지 연속으로 밀어붙인다 */
-    const reps=1+upg.power;
+    const reps=1+digPowerNow();
     let done=false, n=0;
     let already=false;
     for(let k=0;k<reps;k++){
@@ -3987,20 +4146,21 @@ async function mpDig(i,auto){
       render(); drawMinimap(); updateUI(); return;
     }
     if(!done){
-      digMsg(`${sp?sp.n:'단단한 땅'} 채굴 ${n}/${need}`,'none');
+      digMsg(`${sp?sp.n+((tiles[i]===4||tiles[i]===5)?graveTag():''):'단단한 땅'} 채굴 ${n}/${need}`,'none');
       render(); updateUI(); return;
     }
     delete digCnt[i]; markDug(i);
     const r=tileRngAt(i);
     if(sp&&tiles[i]===4){
-      const cnt=5+Math.floor(r()*6), got=[];
+      const cnt=(5+Math.floor(r()*6))*graveMul(), got=[];
       for(let k=0;k<cnt;k++) got.push(giveCard(player,rollCardR(r,'g'+i+'-'+k)));
-      digMsg(`카드무덤! 카드 ${cnt}장 획득`,'card'); sfx('grave');
+      digMsg(`카드무덤${graveTag()}! 카드 ${cnt}장 획득`,'card'); sfx('grave');
       log(`카드무덤 · ${fmtCards(got)}`); showLootCards(got);
     }else if(sp&&tiles[i]===5){
-      const base=3+countItem('세공증')+Math.floor(r()*15), mul=5+Math.floor(r()*6);
+      const base=3+countItem('세공증')+Math.floor(r()*15);
+      const mul=(5+Math.floor(r()*6))*graveMul();
       const amt=Math.round(base*mul*goldMul()); player.gold+=amt;
-      digMsg(`골드무덤! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
+      digMsg(`골드무덤${graveTag()}! ${G(amt)} 획득 (×${mul})`,'gold'); sfx('grave');
       log(`골드무덤 · ${G(amt)}`); showLootEffect(ICON.gvGold,`골드무덤 · ${G(amt)} 획득`);
     }else if(sp&&tiles[i]===9){
       const p=freeSpot(); player.x=p.x; player.y=p.y;
@@ -4011,7 +4171,8 @@ async function mpDig(i,auto){
       digMsg(res.t,res.k); log(`보물상자 · ${res.e}`); sfx('diamond');
       if(res.card) showLootCards([res.card]); else showLootEffect(ICON.chest,`보물상자 · ${res.e}`);
     }else if(sp){
-      const eff=MAZE[Math.floor(r()*MAZE.length)]();
+      const MT=mazeTable();
+      const eff=MT[Math.floor(r()*MT.length)]();
       digMsg(eff.t,eff.k); log(`미궁 · ${eff.e}`);
       showLootEffect(ICON.maze,`미궁 · ${eff.e}`); sfx('maze');
     }else{
@@ -4026,7 +4187,7 @@ async function mpDig(i,auto){
   }
 
   /* 채굴 강도: need=1 타일도 (1+power)번까지 시도하지만, 한 번 파이면 그 자리에서 끝난다 */
-  const reps=1+upg.power;
+  const reps=1+digPowerNow();
   for(let k=0;k<reps;k++){
     if(player.gold<1) break;
     player.gold-=1; updateUI();
@@ -4071,7 +4232,7 @@ async function mpDigRange(){
   let tried=0, done=0;
   for(let k=0;k<upg.range&&cand.length&&player.gold>0;k++){
     const j=cand.splice(Math.floor(Math.random()*cand.length),1)[0];
-    const need=SPECIAL[tiles[j]]?SPECIAL[tiles[j]].need:tileNeed(j);
+    const need=SPECIAL[tiles[j]]?specNeed(tiles[j]):tileNeed(j);
     tried++;
     if(need>1){
       /* 여러 번 파야 하는 칸은 범위 강도만큼 진행도를 올린다 */
@@ -4105,10 +4266,13 @@ function resetPlayerState(){
   player.digBoostUntil=0;
   player.autoDigUntil=0;
   player.autoMoveUntil=0;
+  player.coopPowerUntil=0;
+  boss=null; minions=[];
+  myBossDmg=0; coopRound=0;      /* 협동 맵 보스·기여도·무덤 레벨은 새 판에서만 초기화 */
   upg={power:0,range:0,rangePower:0};
   digCnt={}; dugCount=0;
   rtApplied={}; duelApplied={}; duel=null; battleFoe=null;
-  lastSent=''; invDirty=false;
+  lastHot=''; lastCold=''; lastSyncAt=0; lastColdAt=0; invDirty=false;
   gameOver=false;
   $('lootBar').innerHTML='';
   $('logBox').innerHTML='';
@@ -4623,7 +4787,7 @@ function bossDamage(dmg,label){
     boss.phase2=true; spawnMinions();
     announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
   }
-  syncBoss();
+  syncBoss(real);
   const pct=(boss.hp/boss.max*100);
   digMsg(`${label} · 보스에게 ${dmg.toLocaleString()} 피해 (${pct.toFixed(1)}%)`,'card');
   if(boss.hp<=0) bossDefeated();
@@ -4637,7 +4801,7 @@ function attackBoss(){
   }
   if(player.gold<1){ digMsg('골드가 부족합니다','warn'); return; }
   player.gold-=1;
-  const dmg=1+upg.power;
+  const dmg=1+digPowerNow();
   sfx('battle');
   bossDamage(dmg,'공격');
 }
@@ -4710,9 +4874,19 @@ function bossDefeated(){
   $('winOverlay').classList.add('show');
   announce('멧돼지를 토벌했습니다!');
 }
-function syncBoss(){
+/* 타격마다 바로 쓰지 않고 1초 동안 피해를 모아 한 번에 전송한다.
+   - Firestore 쓰기/읽기(리스너 전파) 횟수를 크게 줄여 무료 한도 소진을 방지
+   - increment()로 델타만 반영해 동시 공격 시 피해가 유실되는 경쟁 조건도 함께 해결 */
+let _bossPendingDmg=0, _bossFlushTimer=null;
+function syncBoss(dmgDelta){
   if(!isMulti()||!boss) return;
-  roomRef().set({boss:{hp:boss.hp,max:boss.max,x:boss.x,y:boss.y}},{merge:true}).catch(()=>{});
+  _bossPendingDmg+=dmgDelta;
+  if(_bossFlushTimer) return;
+  _bossFlushTimer=setTimeout(()=>{
+    const amt=_bossPendingDmg; _bossPendingDmg=0; _bossFlushTimer=null;
+    if(amt<=0) return;
+    roomRef().update({'boss.hp':firebase.firestore.FieldValue.increment(-amt)}).catch(()=>{});
+  },1000);
 }
 /* 필살기 (Q) */
 function openUlt(){
