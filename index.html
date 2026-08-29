@@ -757,6 +757,12 @@
       <button id="setSfxBtn">끄기</button></div>
     <div class="shop-item"><div class="t-txt">닉네임<div class="t-cost" id="setNameDesc">-</div></div>
       <button class="btn-cyan" id="setNameBtn">변경</button></div>
+    <div class="shop-item"><div class="t-txt">계정<div class="t-cost" id="setAuthDesc">-</div></div>
+      <button id="setLogoutBtn">로그아웃</button></div>
+    <div class="sub-note" id="setLogoutNote" style="text-align:left">
+      로그아웃하면 첫 화면으로 돌아갑니다. 게스트(이름 접속) 상태에서 로그아웃하면
+      그 계정의 다이아몬드·구매 내역을 다시 불러올 수 없으니 주의하세요.
+    </div>
   </div>
 </div>
 
@@ -899,7 +905,7 @@ const CARD_IMG={"10띠": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wB
 /* ================= 상수 ================= */
 /* 새로고침 후에도 어떤 빌드인지 바로 확인할 수 있도록 하는 버전 표시.
    파일을 수정할 때마다 이 값을 올려서 배포하면 화면에서 바로 구분됩니다. */
-const APP_VERSION = 'v1.11.0 · 2026-08-27';
+const APP_VERSION = 'v1.12.0 · 2026-08-27';
 
 let MAP=100;
 const VIEW_W=15, VIEW_H=11;
@@ -946,11 +952,13 @@ const T_BLOCK=7, T_MERCHANT=8, T_BRIDGE=10, T_BOSS=12;
 /* 홍싸리 협곡 보스 */
 const BOSS_HP=250000;     /* 멧돼지 최대 체력 (고정) */
 const BOSS_DIG_COST=2;    /* 보스 칸 삽질 1회당 소모 골드 (일반 타일의 2배) */
-/* 체력 40% 이하 = [광란] 상태. 순수 삽질만으로 보스를 잡는 것을 막고
-   필살기(12월 한 벌) 위주 공격을 유도하기 위해 삽질 피해를 70% 깎는다.
+/* 체력 35% 이하 = [광란] 상태. 순수 삽질만으로 보스를 잡는 것을 막고
+   필살기(12월 한 벌) 위주 공격을 유도하기 위해 삽질 피해를 90% 깎는다.
    필살기 피해는 이 감소의 영향을 받지 않는다. */
-const RAMPAGE_THRESH=0.4;
-const RAMPAGE_DIG_CUT=0.7;
+const RAMPAGE_THRESH=0.35;
+const RAMPAGE_DIG_CUT=0.9;
+const MINION_THRESH=0.5;   /* 부하 몬스터 출현 체력 비율 */
+const COOP_CHEST_MAX=20;   /* 협동 맵 보물상자 상한 */
 const bossRampage=()=>!!(boss&&boss.hp>0&&boss.hp<=boss.max*RAMPAGE_THRESH);
 let boss=null;            /* {x,y,hp,max,phase2} — 좌상단 기준 5×5 */
 let myBossDmg=0;          /* 내 누적 기여 피해 */
@@ -959,8 +967,8 @@ const isCoop=()=>!!theme().coop;
 const bossAt=(x,y)=>boss&&x>=boss.x&&x<boss.x+5&&y>=boss.y&&y<boss.y+5;
 /* 각 월 한 벌로 쓰는 필살기 (보스 최대 체력 대비 비율) */
 const ULT={12:0.15, 11:0.03, 10:0.005, 9:0.0012, 8:0.00025};
-/* 필살기 강화 — 상인에게서 +8강까지. 1강마다 피해 ×1.15 (8강 = ×3.059) */
-const ULT_UP_MUL=1.15;
+/* 필살기 강화 — 상인에게서 +8강까지. 1강마다 피해 ×1.1 (8강 = ×2.1436) */
+const ULT_UP_MUL=1.1;
 const ultMul=()=>Math.pow(ULT_UP_MUL,upg.ult||0);
 /* 협동 맵 무덤 레벨 — 맵이 새로고침될 때마다 1씩 올라간다 (최대 5)
      need  : 한 칸을 완성하는 데 필요한 삽질 횟수
@@ -1513,7 +1521,12 @@ function buildTiles(seed){
   else place(5,Math.max(2,Math.round(th.gold*scale))*graveX);
   place(6,Math.max(1,Math.round(th.maze*scale)));
   if(th.tele) place(9,Math.max(2,Math.round(th.tele*scale)));
-  if(th.chest) place(11,Math.max(1,Math.round(th.chest*scale)));
+  if(th.chest){
+    let nChest=Math.max(1,Math.round(th.chest*scale));
+    /* 협동 맵은 맵을 갈아엎을 때마다 보물상자가 1개씩 늘어난다 (최대 20개) */
+    if(isCoop()) nChest=Math.min(COOP_CHEST_MAX,nChest+coopRound);
+    place(11,nChest);
+  }
   /* 협동 맵: 5×5 멧돼지 보스 배치 (체력·부하는 맵을 갈아엎어도 그대로) */
   const prevBoss=boss, prevMin=minions;
   boss=null; minions=[];
@@ -1576,7 +1589,7 @@ function coopMapRefreshReward(){
   digMsg(`땅을 모두 파헤쳤습니다 · ${G(rw)} 지급`,'gold');
   log(`새 땅으로 교체 (${coopRound}회차) · <b>${G(rw)}</b> 지급`);
   const after=graveLv();
-  if(after>before) announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${after} (체력 ${graveInfo().need} · 골드 ×${graveInfo().mul} · 카드 상위월 ×${graveCMul()})`);
+  if(after>before) announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${after}`);
   markInvDirty();
 }
 function checkMapExhausted(){
@@ -1633,7 +1646,7 @@ function mpApplyMap(r,announceIt){
     player.gold+=rw;
     digMsg(`땅을 모두 파헤쳤습니다 · ${G(rw)} 지급`,'gold');
     log(`새 땅으로 교체 (${coopRound}회차) · <b>${G(rw)}</b> 지급`);
-    announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${graveLv()} (체력 ${graveInfo().need} · 골드 ×${graveInfo().mul} · 카드 상위월 ×${graveCMul()})`);
+    announce(`협곡의 무덤이 깊어졌습니다 · 무덤 Lv.${graveLv()}`);
     markInvDirty(); syncMe(true);
   }
   if(announceIt) announce(`땅이 모두 파헤쳐졌습니다! ${theme().name} ${MAP}×${MAP} 구역으로 이동합니다`);
@@ -2031,7 +2044,7 @@ function digBossArea(){
     for(let m=0;m<reps2;m++){ if(dug[j]||player.gold<1) break; if(digOnce(j,true)) break; }
   });
   sfx('battle');
-  /* [광란] 상태(체력 40% 이하)에서는 삽질 피해가 70% 깎인다 — 필살기로 마무리하라는 신호 */
+  /* [광란] 상태(체력 35% 이하)에서는 삽질 피해가 90% 깎인다 — 필살기로 마무리하라는 신호 */
   if(bossRampage()) dmg=Math.max(1,Math.round(dmg*(1-RAMPAGE_DIG_CUT)));
   bossDamage(dmg,'공격');
   render(); drawMinimap(); updateUI(); checkMapExhausted();
@@ -2953,7 +2966,7 @@ function updateUI(){
       const share=boss.max?(myBossDmg/boss.max*100):0;
       $('bossPct').innerHTML=pct.toFixed(1)+'%'
         +(minions.length?` <span style="color:#ff9a4a">· 부하 ${minions.length}마리 남음 (보스 무적)</span>`
-          :bossRampage()?` <span style="color:#ff5a5a">· 광란 (삽질 피해 -70%)</span>`:'');
+          :bossRampage()?` <span style="color:#ff5a5a">· 광란 (삽질 피해 -90%)</span>`:'');
       $('bossHpTxt').textContent=boss.hp.toLocaleString()+' / '+boss.max.toLocaleString()
         +'  ·  내 기여 '+share.toFixed(1)+'%';
       $('bossFill').style.width=pct+'%';
@@ -3379,9 +3392,9 @@ function watchRoomDoc(){
       /* 다른 사람의 공격으로 임계값 아래로 내려간 경우에도 같은 연출이 떠야 한다 */
       if(!boss.rampage&&boss.hp>0&&boss.hp<=boss.max*RAMPAGE_THRESH){
         boss.rampage=true;
-        announce('멧돼지가 광란 상태에 돌입했습니다! 삽질 피해가 크게 줄어듭니다 · 필살기로 마무리하세요');
+        announce('보스가 광란 상태가 돌입하였습니다.');
       }
-      if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*0.2){
+      if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*MINION_THRESH){
         boss.phase2=true; spawnMinions();
         announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
       }
@@ -3534,6 +3547,20 @@ $('setBtnLobby').onclick=openSettings;
 $('setBgmBtn').onclick=toggleBgm;
 $('setSfxBtn').onclick=toggleSfx;
 $('setNameBtn').onclick=()=>{ changeName(); renderSettings(); };
+$('setLogoutBtn').onclick=async()=>{
+  const u=auth&&auth.currentUser;
+  if(!u) return;
+  const warn=u.isAnonymous
+    ? '게스트 계정에서 로그아웃하면 이 계정의 다이아몬드·구매 내역을 다시 불러올 수 없습니다.\n정말 로그아웃할까요?'
+    : '로그아웃하고 첫 화면으로 돌아갑니다.\n계속할까요?';
+  if(!confirm(warn)) return;
+  sfx('click');
+  try{ flushBest(); }catch(e){}
+  try{ await leaveRoom(); }catch(e){}
+  try{ await auth.signOut(); }catch(e){ console.error(e); }
+  /* 리스너·타이머·게임 상태가 얽혀 있어 부분 정리보다 새로고침이 확실하다 */
+  location.reload();
+};
 /* 닫기 X · 바깥 클릭 · ESC */
 document.querySelectorAll('[data-close]').forEach(b=>{
   b.onclick=()=>closeOverlay(b.dataset.close);
@@ -4735,6 +4762,12 @@ function renderSettings(){
   if(sd){ sd.textContent=sfxOn?'켬':'끔'; }
   if(sb){ sb.textContent=sfxOn?'끄기':'켜기'; sb.className=sfxOn?'':'btn-cyan'; }
   const nd=$('setNameDesc'); if(nd) nd.textContent=player.name;
+  /* 계정 상태 · 로그아웃 */
+  const ad=$('setAuthDesc'), lb=$('setLogoutBtn'), ln=$('setLogoutNote');
+  const u=(typeof auth!=='undefined'&&auth)?auth.currentUser:null;
+  if(ad) ad.textContent=!u?'접속 안 함':(u.isAnonymous?'게스트 접속':(u.email||'Google 계정'));
+  if(lb) lb.style.display=u?'':'none';
+  if(ln) ln.style.display=(u&&u.isAnonymous)?'':'none';
 }
 function openSettings(){ renderSettings(); $('setOverlay').classList.add('show'); }
 
@@ -5090,7 +5123,7 @@ function renderMerchant(){
   ];
   /* 홍싸리 협곡 전용 — 필살기 피해 배율 강화 (+1강마다 ×1.15) */
   if(isCoop()) rows.push({k:'ult',n:'필살기 강화',
-    d:'필살기 피해가 1강마다 ×1.15로 늘어납니다',
+    d:'필살기 피해가 1강마다 ×1.1로 늘어납니다',
     eff:lv=>`피해 ×${Math.pow(ULT_UP_MUL,lv).toFixed(2)} · 12월 ${Math.round(BOSS_HP*ULT[12]*Math.pow(ULT_UP_MUL,lv)).toLocaleString()}`});
   $('merchList').innerHTML='';
   rows.forEach(r=>{
@@ -5153,9 +5186,9 @@ function bossDamage(dmg,label){
   boss.hp=Math.max(0,boss.hp-dmg);
   if(!boss.rampage&&boss.hp>0&&boss.hp<=boss.max*RAMPAGE_THRESH){
     boss.rampage=true;
-    announce('멧돼지가 광란 상태에 돌입했습니다! 삽질 피해가 크게 줄어듭니다 · 필살기로 마무리하세요');
+    announce('보스가 광란 상태가 돌입하였습니다.');
   }
-  if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*0.2){
+  if(!boss.phase2&&boss.hp>0&&boss.hp<=boss.max*MINION_THRESH){
     boss.phase2=true; spawnMinions();
     announce('멧돼지가 성이 났습니다! 부하 3마리가 나타납니다');
   }
